@@ -1,0 +1,12 @@
+{
+  "[luau]": {
+    "editor.defaultFormatter": "JohnnyMorganz.stylua",
+    "editor.formatOnSave": true
+  },
+  "editor.insertSpaces": false,
+  "files.eol": "\n",
+  "luau-lsp.fflags.override": {
+    "LuauSolverV2": "true"
+  },
+  "luau-lsp.platform.type": "roblox"
+}

@@ -1,0 +1,37 @@
+# Git hooks. Install once with `lefthook install`.
+#
+# These are the same gates CI runs (.github/workflows/checks.yaml); running them here means a red
+# build is found before the push rather than after it. The tree is at zero: keep it there.
+pre-commit:
+  parallel: true
+  commands:
+    format:
+      glob: "*.luau"
+      run: stylua --check {staged_files}
+    lint:
+      glob: "*.luau"
+      run: selene {staged_files}
+    types:
+      glob: "*.luau"
+      # Whole project: luau-lsp needs every module's requires, not the staged subset.
+      run: sh scripts/type-check.sh
+    strict-mode:
+      glob: "*.luau"
+      run: sh scripts/check-strict.sh {staged_files}
+    file-size:
+      glob: "*.luau"
+      # 300 lines, no exceptions: a file that reaches it is split into modules, not listed.
+      run: sh scripts/check-file-size.sh {staged_files}
+    english-only:
+      run: sh scripts/check-english.sh {staged_files}
+
+pre-push:
+  commands:
+    package:
+      # The built pesde package carries every file of src/, not just the tree the specs read.
+      run: sh scripts/check-package.sh
+    tests:
+      run: sh scripts/run-tests.sh
+    mutants:
+      # Every small slip in the pipe must fail the suite (tests/Mutants.luau).
+      run: luneblox run tests/Mutate --yes

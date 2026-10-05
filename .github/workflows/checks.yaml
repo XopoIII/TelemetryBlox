@@ -1,0 +1,46 @@
+# The same gates lefthook runs before a commit and before a push. Keep the two in step.
+name: Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: CompeyDev/setup-rokit@v0.2.1
+
+      - name: Format
+        run: stylua --check src tests
+
+      - name: Lint
+        run: selene src tests
+
+      - name: Strict mode
+        run: sh scripts/check-strict.sh
+
+      - name: File size
+        run: sh scripts/check-file-size.sh
+
+      - name: English only
+        run: sh scripts/check-english.sh
+
+      - name: Types
+        run: sh scripts/type-check.sh
+
+      - name: Package
+        run: sh scripts/check-package.sh
+
+      - name: Tests
+        run: sh scripts/run-tests.sh
+
+      - name: Mutants
+        run: luneblox run tests/Mutate --yes

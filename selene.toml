@@ -1,0 +1,8 @@
+# "roblox" builds on Luau and knows its string escapes (`\x`, `\u{}`); "luau+roblox" loses them.
+std = "roblox"
+
+[lints]
+empty_if = "warn"
+shadowing = "warn"
+multiple_statements = "warn"
+deprecated = "warn"
