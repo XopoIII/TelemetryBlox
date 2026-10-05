@@ -1,0 +1,91 @@
+--!strict
+--- What a row's context may hold, and the copy that holds only that.
+---
+--- A context is whatever the game hands `emit`, and one bad value must not cost a batch: a NaN or an
+--- infinity makes the whole batch's JSON invalid, an Instance or a function cannot be encoded at all,
+--- and one huge string can push a post past the size the ingest accepts. So the row keeps a copy with
+--- every such value left out, and the caller's own table is never touched or kept.
+---
+--- Kept: strings (cut at `MAX_STRING` bytes), finite numbers, booleans, and tables of these down to
+--- `MAX_DEPTH` levels. A table with an array part is kept as that array; any other table keeps its
+--- string keys. Everything else is dropped from its row, silently: the row itself still lands.
+const Clean = {}
+
+--> Bytes of one string a row keeps.
+Clean.MAX_STRING = 1000
+--> Levels of nested tables a row keeps: the context is level 1.
+Clean.MAX_DEPTH = 4
+
+--> Cuts `text` at `limit` bytes without splitting a UTF-8 character, which would make the JSON invalid.
+function Clean.cut(text: string, limit: number): string
+	if #text <= limit then
+		return text
+	end
+	local stop = limit
+	-- A byte of the form 10xxxxxx continues a character: step back until the cut falls before one starts.
+	while stop > 0 do
+		const following = string.byte(text, stop + 1)
+		if following < 0x80 or following >= 0xC0 then
+			break
+		end
+		stop -= 1
+	end
+	return string.sub(text, 1, stop)
+end
+
+--> Whether a number can be written as JSON: not NaN and not an infinity.
+function Clean.finite(value: number): boolean
+	return value == value and value ~= math.huge and value ~= -math.huge
+end
+
+local copy: (source: { [any]: any }, depth: number) -> { [any]: any }
+
+const function kept(value: any, depth: number): any
+	const kind = type(value)
+	if kind == "string" then
+		return Clean.cut(value, Clean.MAX_STRING)
+	elseif kind == "number" then
+		return if Clean.finite(value) then value else nil
+	elseif kind == "boolean" then
+		return value
+	elseif kind == "table" and depth < Clean.MAX_DEPTH then
+		return copy(value, depth + 1)
+	end
+	return nil
+end
+
+function copy(source: { [any]: any }, depth: number): { [any]: any }
+	const out: { [any]: any } = {}
+	const length = #source
+	if length > 0 then
+		-- An array: a dropped element would leave a hole, and a hole ends the array for the encoder,
+		-- so its place is kept by `false`.
+		for index = 1, length do
+			const value = kept(source[index], depth)
+			out[index] = if value == nil then false else value
+		end
+		return out
+	end
+	for key, value in source do
+		if type(key) == "string" then
+			out[key] = kept(value, depth)
+		end
+	end
+	return out
+end
+
+--> The copy of `context` a row keeps. Total: nil gives an empty context.
+function Clean.context(context: { [any]: any }?): { [string]: any }
+	if context == nil then
+		return {}
+	end
+	const out: { [string]: any } = {}
+	for key, value in context do
+		if type(key) == "string" then
+			out[key] = kept(value, 1)
+		end
+	end
+	return out
+end
+
+return Clean
