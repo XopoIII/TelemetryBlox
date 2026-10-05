@@ -1,0 +1,33 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab",
+		"indentWidth": 4,
+		"lineWidth": 120
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended"
+		}
+	},
+	"javascript": {
+		"formatter": {
+			"quoteStyle": "double",
+			"trailingCommas": "all",
+			"semicolons": "always"
+		}
+	},
+	"files": {
+		"includes": [
+			"worker/src/**",
+			"worker/test/**",
+			"worker/testing/**",
+			"worker/bin/**",
+			"worker/*.json",
+			"package.json",
+			"biome.json"
+		]
+	}
+}

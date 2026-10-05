@@ -1,4 +1,4 @@
-# Git hooks. Install once with `lefthook install`.
+# Git hooks. Install once with `lefthook install` (and `npm ci` for the Worker's tools).
 #
 # These are the same gates CI runs (.github/workflows/checks.yaml); running them here means a red
 # build is found before the push rather than after it. The tree is at zero: keep it there.
@@ -24,6 +24,10 @@ pre-commit:
       run: sh scripts/check-file-size.sh {staged_files}
     english-only:
       run: sh scripts/check-english.sh {staged_files}
+    worker:
+      glob: "{worker/**,package.json,package-lock.json,biome.json,scripts/check-worker.sh}"
+      # Types, format, the tests, and worker/dist being what worker/src builds: a game runs dist.
+      run: sh scripts/check-worker.sh
 
 pre-push:
   commands:
@@ -35,3 +39,5 @@ pre-push:
     mutants:
       # Every small slip in the pipe must fail the suite (tests/Mutants.luau).
       run: luneblox run tests/Mutate --yes
+    worker:
+      run: sh scripts/check-worker.sh

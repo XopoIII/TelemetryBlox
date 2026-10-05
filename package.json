@@ -1,0 +1,40 @@
+{
+	"name": "telemetryblox",
+	"version": "0.1.0",
+	"description": "The Worker half of TelemetryBlox: the ingest for a Roblox game's telemetry batches and the Telegram sender of its alerts, deployed by each game as a project of its own",
+	"private": true,
+	"license": "MIT",
+	"author": "XopoIII",
+	"repository": "github:XopoIII/TelemetryBlox",
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./worker/dist/index.d.ts",
+			"default": "./worker/dist/index.js"
+		},
+		"./testing": "./worker/testing/index.mjs",
+		"./package.json": "./package.json"
+	},
+	"bin": {
+		"telemetryblox-check-queries": "worker/bin/check-queries.mjs"
+	},
+	"files": [
+		"worker/dist",
+		"worker/migrations",
+		"worker/queries",
+		"worker/testing",
+		"worker/bin"
+	],
+	"scripts": {
+		"build": "tsc -p worker/tsconfig.build.json",
+		"typecheck": "tsc -p worker/tsconfig.json",
+		"lint": "biome check",
+		"test": "npm run build && node --test worker/test/",
+		"check": "sh scripts/check-worker.sh"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.15",
+		"@cloudflare/workers-types": "5.20261005.1",
+		"typescript": "7.0.2"
+	}
+}
