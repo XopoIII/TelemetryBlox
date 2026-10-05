@@ -1,0 +1,15 @@
+name = "xopoiii/telemetryblox"
+version = "0.1.0"
+description = "A game server's telemetry pipe: rows in a bounded ring, sent in batches to the game's own ingest, with no player id leaving the server"
+authors = ["XopoIII"]
+repository = "https://github.com/XopoIII/TelemetryBlox"
+license = "MIT"
+includes = ["src/**", "pesde.toml", "README.md", "LICENSE"]
+
+[target]
+environment = "roblox_server"
+lib = "src/init.luau"
+build_files = ["src"]
+
+[indices]
+default = "https://github.com/pesde-pkg/index"
