@@ -1,6 +1,7 @@
 // The ingest, run for real against SQLite: `npm test`, which builds worker/dist first. The tests
 // read the built JavaScript, which is what a game runs.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createWorker } from "../dist/index.js";
 import { freshDatabase } from "../testing/index.mjs";
@@ -375,4 +376,51 @@ test("a config that is wrong fails when the Worker is made, not on the first bat
 	);
 	// The smallest config there is.
 	assert.equal(typeof createWorker({ game: "x" }).fetch, "function");
+});
+
+test("the batch the Luau pipe is checked against is taken whole", async () => {
+	// tests/wire/batch.json is what the pipe posts, to the field (tests/unit/Wire.luau).
+	const wire = readFileSync(new URL("../../tests/wire/batch.json", import.meta.url), "utf8");
+	const env = environment();
+	const answer = await call(env, "/ingest", { raw: wire });
+	assert.deepEqual(answer, { status: 200, body: { ok: true, accepted: 2, skipped: 0, duplicate: false } });
+	assert.deepEqual(
+		rows(
+			env,
+			`SELECT env, schema_version, universe_id, place_id, place_version, job_id, server_start, first_seq, last_seq, n
+			 FROM batches`,
+		),
+		[
+			{
+				env: "live",
+				schema_version: 1,
+				universe_id: "111",
+				place_id: "222",
+				place_version: 7,
+				job_id: "job-a",
+				server_start: 1800000000,
+				first_seq: 1,
+				last_seq: 2,
+				n: 2,
+			},
+		],
+	);
+	assert.deepEqual(rows(env, "SELECT seq, t, event, actor, ctx FROM events ORDER BY seq"), [
+		{ seq: 1, t: 1800000000, event: "feed", actor: "u_b6143fd8f67c8ca4", ctx: '{"pieces":3}' },
+		{ seq: 2, t: 1800000030, event: "purchase", actor: null, ctx: '{"robux":25}' },
+	]);
+	// Every field of the fixture's envelope is one the ingest knows: none is silently dropped but
+	// `sentAt`, which the ingest replaces with its own clock.
+	assert.deepEqual(Object.keys(JSON.parse(wire)).sort(), [
+		"env",
+		"events",
+		"game",
+		"jobId",
+		"placeId",
+		"placeVersion",
+		"schemaVersion",
+		"sentAt",
+		"serverStart",
+		"universeId",
+	]);
 });

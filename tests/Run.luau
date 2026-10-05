@@ -20,5 +20,6 @@ require("./unit/ErrorReporter")
 require("./unit/Options")
 require("./unit/Front")
 require("./unit/Started")
+require("./unit/Wire")
 
 Spec.finish()

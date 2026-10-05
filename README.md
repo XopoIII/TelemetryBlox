@@ -18,8 +18,8 @@ TelemetryBlox is two things in one repository:
 It was built and used in the game Grabby Pit before it became a package, and holds nothing of any
 game: every event name, endpoint, secret's name, alert rule and threshold is handed in.
 
-> **Status: 0.1.0.** The pipe's rules are proven by 74 specs that run off Roblox on LuneBlox, and
-> each of 154 small slips in the code makes the suite fail (`tests/Mutate.luau`). The Worker's 61
+> **Status: 0.1.0.** The pipe's rules are proven by 76 specs that run off Roblox on LuneBlox, and
+> each of 154 small slips in the code makes the suite fail (`tests/Mutate.luau`). The Worker's 62
 > tests run against Node's own SQLite, which D1 is. **As a package it has not yet run in a Roblox
 > server or on Cloudflare:** the engine adapter (`src/RobloxServices.luau`) is checked against the
 > Roblox API by the type gate only, and the Worker was run in local `workerd` only. Try it in a test
@@ -368,6 +368,9 @@ A batch is one JSON object, posted with `content-type: application/json` and the
 player. The protected rows of a batch come first. Roblox encodes an empty context as `[]`, which the
 Worker reads as `{}`. **A batch's identity is `(jobId, serverStart, the smallest seq)`**: a batch sent
 again carries the same three and is stored once.
+
+`tests/wire/batch.json` is one such batch, and both halves are checked against it: a spec proves the
+pipe posts exactly it, and a test proves the Worker stores exactly it.
 
 The Worker answers `200 { ok, accepted, skipped, duplicate }`, `401` (the key), `413` (the body),
 `400 { error: "invalid_envelope", detail }` or `500` (the insert failed; the pipe sends it again).

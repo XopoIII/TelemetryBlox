@@ -117,9 +117,10 @@ The Worker (`worker/`):
 ## The two halves agree
 
 The wire format is written three times: `Pipe.luau` builds it, `ingest.ts` reads it, and README.md
-says it ("The wire"). `tests/unit/Pipe.luau` and `worker/test/ingest.test.mjs` each pin the exact
-envelope. A change to one is a change to all of them, in one pull request, with a new
-`SCHEMA_VERSION` when an old Worker could not read a new batch.
+says it ("The wire"). One file holds them together: `tests/wire/batch.json`. `tests/unit/Wire.luau`
+proves the pipe posts exactly that batch, and `worker/test/ingest.test.mjs` proves the Worker stores
+exactly it. A change to the format changes the fixture, both halves and the README in one pull
+request, with a new `SCHEMA_VERSION` when an old Worker could not read a new batch.
 
 ## Distribution
 

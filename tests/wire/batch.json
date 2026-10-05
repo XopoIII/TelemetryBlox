@@ -1,0 +1,15 @@
+{
+	"schemaVersion": 1,
+	"game": "example",
+	"universeId": "111",
+	"placeId": "222",
+	"placeVersion": 7,
+	"jobId": "job-a",
+	"env": "live",
+	"serverStart": 1800000000,
+	"sentAt": 1800000035,
+	"events": [
+		{ "seq": 2, "t": 1800000030, "event": "purchase", "ctx": { "robux": 25 } },
+		{ "seq": 1, "t": 1800000000, "event": "feed", "actor": "u_b6143fd8f67c8ca4", "ctx": { "pieces": 3 } }
+	]
+}
