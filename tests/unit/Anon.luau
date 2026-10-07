@@ -1,8 +1,9 @@
 --!strict
 --- The pseudonym: the same player gives the same token on every machine, and never their id.
 ---
---- The tokens below are pinned. They were computed by this code and by Grabby Pit's copy of the hash
---- alike (2026-10-05): a change that moves one makes every player of every game a new one.
+--- The tokens below are pinned. They were computed by this code and by the hash of the game it was
+--- extracted from alike (2026-10-05): a change that moves one makes every player of every game a new
+--- one.
 const Anon = require("@telemetryblox/Anon")
 const Hash = require("@telemetryblox/Hash")
 const Spec = require("../Spec")

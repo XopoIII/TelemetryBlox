@@ -180,6 +180,18 @@ const MUTANTS: { Mutant.Mutant } = {
 	},
 	{
 		file = "src/Options.luau",
+		from = 'maxString = positive(options.maxStringBytes, defaults.maxStringBytes, "maxStringBytes"),',
+		to = "maxString = defaults.maxStringBytes,",
+		breaks = "the game's string limit reaches the copy",
+	},
+	{
+		file = "src/Options.luau",
+		from = 'maxDepth = positive(options.maxDepth, defaults.maxDepth, "maxDepth"),',
+		to = "maxDepth = defaults.maxDepth,",
+		breaks = "the game's depth reaches the copy",
+	},
+	{
+		file = "src/Options.luau",
 		from = "placeVersion = options.placeVersion,",
 		to = "placeVersion = nil,",
 		breaks = "the game's place version reaches the pipe",

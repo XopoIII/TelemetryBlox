@@ -25,7 +25,7 @@
 import { type Alert, type BatchMeta } from "./alerts.js";
 import { type Env, type Resolved, type SeenEvent, type WorkerConfig } from "./config.js";
 export type { Alert, BatchMeta } from "./alerts.js";
-export type { AlertRule, BindingNames, DigestConfig, DigestDay, Env, Marks, Resolved, ScanRule, SeenEvent, Severity, WorkerConfig, } from "./config.js";
+export type { AlertRule, BindingNames, DigestConfig, DigestDay, Env, Marks, Resolved, RobloxKind, ScanRule, SeenEvent, Severity, WorkerConfig, } from "./config.js";
 export { DEFAULTS, field, MAX_SCAN_RULES, short, who } from "./config.js";
 export { robloxAlertText } from "./roblox.js";
 /** The Worker's parts over one game's config, for a game's own tests and tools. */

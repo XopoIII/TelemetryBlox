@@ -5,6 +5,7 @@
 --- what its key's secret is called, its tag, its vocabulary, its salt. `resolve` checks the options
 --- when the game starts, loudly, so a mistake in them is an error at boot and never a silence in the
 --- data; nothing after it can raise into the game.
+const Clean = require("./Clean")
 const Pipe = require("./Pipe")
 const Ring = require("./Ring")
 
@@ -21,6 +22,8 @@ Options.DEFAULTS = table.freeze({
 	maxTries = 3,
 	closeBudget = 20,
 	closeQuiet = 2,
+	maxStringBytes = Clean.MAX_STRING,
+	maxDepth = Clean.MAX_DEPTH,
 })
 
 export type Options<Name> = {
@@ -57,7 +60,12 @@ export type Options<Name> = {
 	closeBudget: number?,
 	--> Seconds the server must be empty and silent before the drain ends early.
 	closeQuiet: number?,
-	--> Where the pipe says a post failed. `warn` by default.
+	--> Bytes of one string a row's context keeps; a longer one is cut. 1000 by default. A game whose
+	--> rows carry long text (a whole error message) raises it, and its posts grow by as much.
+	maxStringBytes: number?,
+	--> Levels of nested tables a row's context keeps: the context is level 1. 4 by default.
+	maxDepth: number?,
+	--> Where the pipe says a post failed, and where a captured server error is said. `warn` by default.
 	log: ((id: string, context: { [string]: any }) -> ())?,
 }
 
@@ -68,6 +76,7 @@ export type Resolved = {
 	priorities: { [string]: Ring.Priority },
 	dropEvent: string,
 	salt: string,
+	clean: Clean.Limits,
 }
 
 const PRIORITIES: { [string]: boolean } = { bulk = true, protected = true, urgent = true }
@@ -158,6 +167,10 @@ function Options.resolve(options: Options<any>, isStudio: boolean): Resolved
 		priorities = priorities,
 		dropEvent = dropEvent,
 		salt = text(options.salt, "salt"),
+		clean = {
+			maxString = positive(options.maxStringBytes, defaults.maxStringBytes, "maxStringBytes"),
+			maxDepth = positive(options.maxDepth, defaults.maxDepth, "maxDepth"),
+		},
 	}
 end
 

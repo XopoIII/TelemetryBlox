@@ -79,6 +79,22 @@ Spec.test("a long string is cut at 1000 bytes, and a short one is not", function
 	Spec.equal(Clean.cut("abc", 10), "abc", "under the limit")
 end)
 
+Spec.test("the limits handed in are the ones the copy is made under", function()
+	Spec.equal(Clean.DEFAULTS, { maxString = 1000, maxDepth = 4 }, "the defaults")
+	const long = string.rep("a", 5000)
+	Spec.equal(#Clean.context({ s = long }, { maxString = 4000, maxDepth = 4 }).s, 4000, "a longer string")
+	Spec.equal(#Clean.context({ s = long }, { maxString = 10, maxDepth = 4 }).s, 10, "a shorter one")
+	Spec.equal(#Clean.context({ list = { long } }, { maxString = 7, maxDepth = 4 }).list[1], 7, "nested too")
+	const deep = { l2 = { l3 = { l4 = { l5 = { l6 = { never = 1 }, at = 5 }, at = 4 }, at = 3 }, at = 2 }, at = 1 }
+	Spec.equal(
+		Clean.context(deep, { maxString = 1000, maxDepth = 5 }),
+		{ l2 = { l3 = { l4 = { l5 = { at = 5 }, at = 4 }, at = 3 }, at = 2 }, at = 1 },
+		"a level deeper"
+	)
+	Spec.equal(Clean.context(deep, { maxString = 1000, maxDepth = 2 }), { l2 = { at = 2 }, at = 1 }, "shallower")
+	Spec.equal(Clean.context(deep, { maxString = 1000, maxDepth = 1 }), { at = 1 }, "the context alone")
+end)
+
 Spec.test("a cut never splits a UTF-8 character", function()
 	-- "a", then a two-byte character (C3 A9), then "b".
 	const text = "a\u{E9}b"

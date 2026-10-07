@@ -44,6 +44,7 @@ Spec.test("the defaults are the pipe's documented numbers", function()
 		priorities = { feed = "bulk", purchase = "urgent", telemetry_drop = "protected" },
 		dropEvent = "telemetry_drop",
 		salt = "example/telemetry/actor/v1:00000000",
+		clean = { maxString = 1000, maxDepth = 4 },
 	}, "resolved")
 end)
 
@@ -58,6 +59,8 @@ Spec.test("what the game sets is what the pipe gets", function()
 	given.closeBudget = 10
 	given.closeQuiet = 1
 	given.placeVersion = 42
+	given.maxStringBytes = 60000
+	given.maxDepth = 6
 	given.environment = "test"
 	const resolved = Options.resolve(given, false)
 	Spec.equal({
@@ -72,6 +75,7 @@ Spec.test("what the game sets is what the pipe gets", function()
 		resolved.pipe.placeVersion,
 	}, { 600, 30, 500, 4000, 250, 5, 10, 1, 42 }, "numbers")
 	Spec.equal(resolved.pipe.env, "test", "environment")
+	Spec.equal(resolved.clean, { maxString = 60000, maxDepth = 6 }, "the context's limits")
 end)
 
 Spec.test("Studio never has a destination, whatever the game says, and is always called studio", function()
@@ -119,6 +123,8 @@ Spec.test("a number that is not positive is an error that says which", function(
 		"maxTries",
 		"closeBudget",
 		"closeQuiet",
+		"maxStringBytes",
+		"maxDepth",
 	}
 	for _, field in fields do
 		for _, bad in { 0, -1, 0 / 0, math.huge, "60" } do

@@ -36,6 +36,13 @@ done
 	echo "check-package: pesde publish --dry-run failed" >&2
 	exit 1
 }
+# pesde can refuse to pack and still exit with zero (an outdated lockfile after a version bump does):
+# no archive is a failure of its own, said with pesde's words, not a package that "leaves out" every file.
+if [ ! -f "$WORK/pesde/package.tar.gz" ]; then
+	cat "$WORK/pesde.log" >&2
+	echo "check-package: pesde publish --dry-run packed nothing" >&2
+	exit 1
+fi
 tar -tzf "$WORK/pesde/package.tar.gz" | grep '^src/.*\.luau$' | sort >"$WORK/pesde.list"
 
 missing="$(comm -23 "$WORK/expected" "$WORK/pesde.list")"

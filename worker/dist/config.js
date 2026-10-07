@@ -22,6 +22,7 @@ export const DEFAULTS = {
         digest: "[digest]",
         notice: "[notice]",
         roblox: "[roblox]",
+        cut: "...",
     },
     bindings: {
         database: "DB",
@@ -38,10 +39,13 @@ const WORD = /^[A-Za-z0-9_]+$/;
 export function field(ctx, name) {
     return typeof ctx === "object" && ctx !== null ? ctx[name] : undefined;
 }
-/** A value as a message says it: text as it is, anything else as JSON, cut at `limit`. */
-export function short(value, limit = 160) {
+/**
+ * A value as a message says it: text as it is, anything else as JSON, cut at `limit` and ended with
+ * `cut` when it was longer (a game's own mark is `marks.cut`).
+ */
+export function short(value, limit = 160, cut = DEFAULTS.marks.cut) {
     const s = typeof value === "string" ? value : value === undefined ? "?" : JSON.stringify(value);
-    return s.length > limit ? `${s.slice(0, limit)}...` : s;
+    return s.length > limit ? `${s.slice(0, limit)}${cut}` : s;
 }
 /** A player as a message names them: the pseudonym, shortened. */
 export function who(actor) {
@@ -64,7 +68,7 @@ function seconds(value, fallback, name) {
         fail(`\`${name}\` must be zero or more seconds`);
     return value;
 }
-function rule(name, given, cooldown) {
+function rule(name, given, cooldown, cut) {
     const from = typeof given === "string" ? { severity: given } : given;
     if (!(from.severity in cooldown))
         fail(`the alert for ${name} has no such severity: ${String(from.severity)}`);
@@ -77,7 +81,8 @@ function rule(name, given, cooldown) {
             : per === "actor"
                 ? (_event, actor) => `${name}:${actor}`
                 : () => name,
-        text: from.text ?? ((event, actor) => `${name}: ${short(event.ctx)}${event.actor ? `, player ${actor}` : ""}`),
+        text: from.text ??
+            ((event, actor) => `${name}: ${short(event.ctx, 160, cut)}${event.actor ? `, player ${actor}` : ""}`),
         cooldown: seconds(from.cooldownSeconds, cooldown[from.severity], `alerts.${name}.cooldownSeconds`),
     };
 }
@@ -90,9 +95,11 @@ export function resolve(config) {
         warning: seconds(config.cooldownSeconds?.warning, DEFAULTS.cooldownSeconds.warning, "cooldownSeconds.warning"),
         info: seconds(config.cooldownSeconds?.info, DEFAULTS.cooldownSeconds.info, "cooldownSeconds.info"),
     };
+    const marks = { ...DEFAULTS.marks, ...config.marks };
     const rules = new Map();
-    for (const [name, given] of Object.entries(config.alerts ?? {}))
-        rules.set(name, rule(name, given, cooldown));
+    for (const [name, given] of Object.entries(config.alerts ?? {})) {
+        rules.set(name, rule(name, given, cooldown, marks.cut));
+    }
     const scan = config.scan ?? [];
     if (scan.length > MAX_SCAN_RULES)
         fail(`\`scan\` holds ${scan.length} rules; ${MAX_SCAN_RULES} is the most`);
@@ -133,7 +140,8 @@ export function resolve(config) {
         environments,
         maxBodyBytes: positive(config.maxBodyBytes, DEFAULTS.maxBodyBytes, "maxBodyBytes"),
         maxEvents: positive(config.maxEvents, DEFAULTS.maxEvents, "maxEvents"),
-        marks: { ...DEFAULTS.marks, ...config.marks },
+        marks,
+        robloxPrefix: config.robloxPrefix ?? (() => `${marks.roblox} ${config.game}:`),
         names: { ...DEFAULTS.bindings, ...config.bindings },
         erasureHint: config.erasureHint,
     };

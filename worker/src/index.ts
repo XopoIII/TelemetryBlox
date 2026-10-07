@@ -39,6 +39,7 @@ export type {
 	Env,
 	Marks,
 	Resolved,
+	RobloxKind,
 	ScanRule,
 	SeenEvent,
 	Severity,

@@ -39,6 +39,8 @@ const options: TelemetryBlox.Options<EventName> = {
 	maxTries = 3,
 	closeBudget = 20,
 	closeQuiet = 2,
+	maxStringBytes = 4000,
+	maxDepth = 4,
 	log = function(id: string, context: { [string]: any })
 		warn(id, context)
 	end,

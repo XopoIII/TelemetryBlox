@@ -92,7 +92,15 @@ export interface Marks {
 	digest: string;
 	notice: string;
 	roblox: string;
+	/** What ends a value that was cut short. Three dots by default. */
+	cut: string;
 }
+
+/**
+ * What a Roblox webhook turned out to be: a right-to-erasure request, the dashboard's Test button,
+ * a refund, any other named event, or an analytics alert (and anything unrecognised).
+ */
+export type RobloxKind = "erasure" | "test" | "refund" | "event" | "alert";
 
 export interface WorkerConfig {
 	/** The game's name, said in every message. A batch tagged for another game is refused. */
@@ -122,6 +130,11 @@ export interface WorkerConfig {
 	/** Events a batch may hold. 2000 by default. */
 	maxEvents?: number;
 	marks?: Partial<Marks>;
+	/**
+	 * What starts the message of a Roblox webhook, by its kind, in place of `marks.roblox` and the
+	 * game's name: a game may mark an obligation (an erasure) apart from a notice.
+	 */
+	robloxPrefix?: (kind: RobloxKind) => string;
 	bindings?: Partial<BindingNames>;
 	/** The line a right-to-erasure message ends with: what to run for this user. */
 	erasureHint?: (userId: string) => string;
@@ -150,6 +163,7 @@ export interface Resolved {
 	maxBodyBytes: number;
 	maxEvents: number;
 	marks: Marks;
+	robloxPrefix: (kind: RobloxKind) => string;
 	names: BindingNames;
 	erasureHint?: (userId: string) => string;
 }
@@ -170,6 +184,7 @@ export const DEFAULTS = {
 		digest: "[digest]",
 		notice: "[notice]",
 		roblox: "[roblox]",
+		cut: "...",
 	} as Marks,
 	bindings: {
 		database: "DB",
@@ -190,10 +205,13 @@ export function field(ctx: unknown, name: string): unknown {
 	return typeof ctx === "object" && ctx !== null ? (ctx as Record<string, unknown>)[name] : undefined;
 }
 
-/** A value as a message says it: text as it is, anything else as JSON, cut at `limit`. */
-export function short(value: unknown, limit = 160): string {
+/**
+ * A value as a message says it: text as it is, anything else as JSON, cut at `limit` and ended with
+ * `cut` when it was longer (a game's own mark is `marks.cut`).
+ */
+export function short(value: unknown, limit = 160, cut = DEFAULTS.marks.cut): string {
 	const s = typeof value === "string" ? value : value === undefined ? "?" : JSON.stringify(value);
-	return s.length > limit ? `${s.slice(0, limit)}...` : s;
+	return s.length > limit ? `${s.slice(0, limit)}${cut}` : s;
 }
 
 /** A player as a message names them: the pseudonym, shortened. */
@@ -219,7 +237,12 @@ function seconds(value: number | undefined, fallback: number, name: string): num
 	return value;
 }
 
-function rule(name: string, given: Severity | AlertRule, cooldown: Record<Severity, number>): ResolvedRule {
+function rule(
+	name: string,
+	given: Severity | AlertRule,
+	cooldown: Record<Severity, number>,
+	cut: string,
+): ResolvedRule {
 	const from: AlertRule = typeof given === "string" ? { severity: given } : given;
 	if (!(from.severity in cooldown)) fail(`the alert for ${name} has no such severity: ${String(from.severity)}`);
 	const per = from.per ?? "event";
@@ -232,7 +255,9 @@ function rule(name: string, given: Severity | AlertRule, cooldown: Record<Severi
 				: per === "actor"
 					? (_event, actor) => `${name}:${actor}`
 					: () => name,
-		text: from.text ?? ((event, actor) => `${name}: ${short(event.ctx)}${event.actor ? `, player ${actor}` : ""}`),
+		text:
+			from.text ??
+			((event, actor) => `${name}: ${short(event.ctx, 160, cut)}${event.actor ? `, player ${actor}` : ""}`),
 		cooldown: seconds(from.cooldownSeconds, cooldown[from.severity], `alerts.${name}.cooldownSeconds`),
 	};
 }
@@ -249,8 +274,11 @@ export function resolve(config: WorkerConfig): Resolved {
 		warning: seconds(config.cooldownSeconds?.warning, DEFAULTS.cooldownSeconds.warning, "cooldownSeconds.warning"),
 		info: seconds(config.cooldownSeconds?.info, DEFAULTS.cooldownSeconds.info, "cooldownSeconds.info"),
 	};
+	const marks: Marks = { ...DEFAULTS.marks, ...config.marks };
 	const rules = new Map<string, ResolvedRule>();
-	for (const [name, given] of Object.entries(config.alerts ?? {})) rules.set(name, rule(name, given, cooldown));
+	for (const [name, given] of Object.entries(config.alerts ?? {})) {
+		rules.set(name, rule(name, given, cooldown, marks.cut));
+	}
 
 	const scan = config.scan ?? [];
 	if (scan.length > MAX_SCAN_RULES) fail(`\`scan\` holds ${scan.length} rules; ${MAX_SCAN_RULES} is the most`);
@@ -290,7 +318,8 @@ export function resolve(config: WorkerConfig): Resolved {
 		environments,
 		maxBodyBytes: positive(config.maxBodyBytes, DEFAULTS.maxBodyBytes, "maxBodyBytes"),
 		maxEvents: positive(config.maxEvents, DEFAULTS.maxEvents, "maxEvents"),
-		marks: { ...DEFAULTS.marks, ...config.marks },
+		marks,
+		robloxPrefix: config.robloxPrefix ?? (() => `${marks.roblox} ${config.game}:`),
 		names: { ...DEFAULTS.bindings, ...config.bindings },
 		erasureHint: config.erasureHint,
 	};

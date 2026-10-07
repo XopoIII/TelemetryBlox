@@ -15,11 +15,11 @@ TelemetryBlox is two things in one repository:
   deploys as a project of its own: its own Worker name, its own D1 database, its own secrets.
   Nothing is shared between two games' deployments but this code.
 
-It was built and used in the game Grabby Pit before it became a package, and holds nothing of any
+It was built and used inside a live game before it became a package, and holds nothing of any
 game: every event name, endpoint, secret's name, alert rule and threshold is handed in.
 
-> **Status: 0.1.0.** The pipe's rules are proven by 76 specs that run off Roblox on LuneBlox, and
-> each of 154 small slips in the code makes the suite fail (`tests/Mutate.luau`). The Worker's 62
+> **Status: 0.2.0.** The pipe's rules are proven by 78 specs that run off Roblox on LuneBlox, and
+> each of 163 small slips in the code makes the suite fail (`tests/Mutate.luau`). The Worker's 64
 > tests run against Node's own SQLite, which D1 is. **As a package it has not yet run in a Roblox
 > server or on Cloudflare:** the engine adapter (`src/RobloxServices.luau`) is checked against the
 > Roblox API by the type gate only, and the Worker was run in local `workerd` only. Try it in a test
@@ -35,7 +35,7 @@ or pin it exactly in `pesde.toml`:
 
 ```toml
 [dependencies]
-TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.1.0", target = "roblox_server" }
+TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.2.0", target = "roblox_server" }
 ```
 
 It has no dependencies. The experience needs **Allow HTTP Requests** on.
@@ -105,7 +105,9 @@ that each does.
   context itself is the game's: the library does not read it.
 - **A row keeps a clean copy of its context.** Strings (cut at 1000 bytes, never inside a
   character), finite numbers, booleans and tables of these to four levels. A NaN, an infinity, an
-  Instance or a function is left out of its row, which still lands.
+  Instance or a function is left out of its row, which still lands. Both limits are the game's to
+  set (`maxStringBytes`, `maxDepth`): a game whose rows carry a whole error message raises the
+  first, and its posts grow by as much.
 
 ### How the rows leave
 
@@ -128,7 +130,7 @@ that each does.
 |---|---|
 | `emit(name, player?, context?)` | writes one row |
 | `onEmit(listener) -> stop` | hears every row as it is written: `(name, player?, context)`. A second sink (Roblox's own analytics) is built on it. A listener must not yield |
-| `captureErrors(event)` | reports every server error as a row of `event`: `message`, `script`, `trace`, `count`. Deduplicated by message: the first three, then the 10th, 100th, 1000th |
+| `captureErrors(event)` | reports every server error as a row of `event`: `message`, `script`, `trace`, `count`. Deduplicated by message: the first three, then the 10th, 100th, 1000th. Each reported one is also said to `log` under the event's name, with its `script`, `message` and `count` |
 | `start()` | spawns the flusher and binds the shutdown drain |
 | `actorOf(userId) -> string` | the pseudonym a player's rows carry, for a row that names a player who is not on this server |
 | `recent(count?) -> { Row }` | a copy of the rows still waiting: `{ seq, t, event, actor?, ctx }` |
@@ -139,7 +141,7 @@ that each does.
 `Options<EventName>`: `game`, `salt`, `secretName`, `events`, `dropEvent` are required; `endpoint`,
 `environment` (what a server outside Studio is called: `"live"` by default, `"test"` for a test
 place), `placeVersion`, `flushSeconds`, `tickSeconds`, `maxBatch`, `ringSize`, `protectedSize`,
-`maxTries`, `closeBudget`, `closeQuiet` and `log` are optional. A wrong option is an error when the
+`maxTries`, `closeBudget`, `closeQuiet`, `maxStringBytes` (1000), `maxDepth` (4) and `log` are optional. A wrong option is an error when the
 telemetry is made, at boot.
 
 A priority is `"bulk"`, `"protected"` or `"urgent"`. The drop event is protected unless the game says
@@ -177,7 +179,7 @@ telemetry/
 		"deploy": "wrangler deploy"
 	},
 	"dependencies": {
-		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.1.0"
+		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.2.0"
 	},
 	"devDependencies": {
 		"wrangler": "4.147.0"
@@ -255,7 +257,8 @@ migrations, the example queries and the testing helpers ride in the same package
 | `nightlyHourUtc` | 3 | The hourly run that is also the nightly one |
 | `environments` | `live`, `studio`, `test` | What a batch may call its server. Only `live` alerts |
 | `maxBodyBytes`, `maxEvents` | 1,000,000, 2000 | The bounds on a body |
-| `marks` | `[critical]` `[warning]` `[info]` `[digest]` `[notice]` `[roblox]` | What starts each kind of message |
+| `marks` | `[critical]` `[warning]` `[info]` `[digest]` `[notice]` `[roblox]`, and `cut`: `...` | What starts each kind of message, and what ends a value that was cut short |
+| `robloxPrefix` | `marks.roblox` and the game's name | `(kind) => string`: what starts a Roblox webhook's message, by its kind (`erasure`, `test`, `refund`, `event`, `alert`) |
 | `bindings` | `DB`, `INGEST_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ALERT_TOKEN` | What the D1 binding and each secret are called |
 | `erasureHint` | none | The line a right-to-erasure message ends with |
 

@@ -70,8 +70,10 @@ export type Telemetry<Name> = {
 	--> Starts the flusher and binds the shutdown drain. A second call does nothing.
 	start: () -> (),
 	--> Reports every server error as a row of `event`, deduplicated by message (`ErrorReporter`):
-	--> `message`, `script`, `trace`, `count`. Call it first, before anything that could raise: the
-	--> errors of a world being built matter most. Raises when `event` is not in the vocabulary.
+	--> `message`, `script`, `trace`, `count`. Each reported one is also said to `log` under the
+	--> event's name: the row answers "is this happening across servers", the log line answers "what
+	--> happened in this one". Call it first, before anything that could raise: the errors of a world
+	--> being built matter most. Raises when `event` is not in the vocabulary.
 	captureErrors: (event: Name) -> (),
 	--> Posts one batch now. Yields. True when the ingest took it.
 	flush: () -> boolean,
@@ -121,7 +123,7 @@ function TelemetryBlox.new(options: Options<any>, services: Services?): Telemetr
 			end
 			actor = anon.token(tostring(userId))
 		end
-		const kept = Clean.context(context)
+		const kept = Clean.context(context, resolved.clean)
 		ring.emit(name, actor, kept)
 		for _, listener in listeners do
 			const ok, problem = pcall(listener, name, player, kept)
@@ -206,6 +208,7 @@ function TelemetryBlox.new(options: Options<any>, services: Services?): Telemetr
 		capturing = true
 		const reporter = ErrorReporter.new({
 			emit = function(report: ErrorReporter.Report)
+				world.warn(event, { script = report.script, message = report.message, count = report.count })
 				write(event, nil, report)
 			end,
 		})

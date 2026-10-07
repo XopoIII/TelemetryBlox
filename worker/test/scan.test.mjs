@@ -290,6 +290,82 @@ test("a right-to-erasure request names the user, the universes and what the game
 	);
 });
 
+test("a game's own prefix starts each kind of webhook, in place of the mark and the name", () => {
+	const kinds = [];
+	const marked = createKit({
+		...CONFIG,
+		robloxPrefix: (kind) => {
+			kinds.push(kind);
+			return `<${kind}>`;
+		},
+	});
+	const alert = { EventPayload: { AlertMessage: JSON.stringify({ summary: "fired", metric: "Memory" }) } };
+	assert.deepEqual(
+		[
+			marked
+				.robloxWebhookText({ EventType: "RightToErasureRequest", EventPayload: { UserId: 7 } })
+				.split("\n")[0],
+			marked.robloxWebhookText({ EventType: "SampleNotification", EventPayload: { UserId: 1 } }),
+			marked.robloxWebhookText({ EventType: "TransactionRefunded", EventPayload: {} }).split("\n")[0],
+			marked.robloxWebhookText({ EventType: "SubscriptionPurchased", EventPayload: {} }).split("\n")[0],
+			marked.robloxWebhookText({ EventType: "AnalyticsAlert", ...alert }),
+			marked.robloxWebhookText(null),
+		],
+		[
+			"<erasure> right to erasure. Delete the data of user 7.",
+			"<test> a test notification arrived (user 1). The webhook works.",
+			"<refund> a refund (TransactionRefunded)",
+			"<event> SubscriptionPurchased",
+			"<alert> Roblox alert: fired (Memory)",
+			"<alert> Roblox alert: null",
+		],
+	);
+	assert.deepEqual(kinds, ["erasure", "test", "refund", "event", "alert", "alert"]);
+	// Without one, every kind starts with the Roblox mark and the game's name.
+	assert.equal(kit.config.robloxPrefix("erasure"), "[roblox] Example Game:");
+	assert.equal(kit.config.robloxPrefix("alert"), "[roblox] Example Game:");
+	assert.equal(createKit({ ...CONFIG, marks: { roblox: "R" } }).config.robloxPrefix("refund"), "R Example Game:");
+});
+
+test("a value that was cut ends with the game's own mark, in a webhook and in a rule's default text", () => {
+	const cut = createKit({ game: "Example Game", marks: { cut: "~" }, alerts: { feed: "info" } });
+	assert.equal(cut.config.marks.cut, "~");
+	assert.equal(kit.config.marks.cut, "...");
+	const long = "x".repeat(500);
+	const refund = cut.robloxWebhookText({ EventType: `Refund${"d".repeat(80)}`, EventPayload: { f: long } });
+	assert.deepEqual(refund.split("\n"), [
+		`[roblox] Example Game: a refund (Refund${"d".repeat(54)}~)`,
+		`f: ${"x".repeat(120)}~`,
+	]);
+	assert.equal(
+		cut.robloxWebhookText({ EventType: "E".repeat(70), EventPayload: long }),
+		`[roblox] Example Game: ${"E".repeat(60)}~\n${"x".repeat(300)}~`,
+	);
+	assert.equal(
+		cut.robloxWebhookText({ EventType: "RightToErasureRequest", EventPayload: { UserId: "9".repeat(30) } }),
+		`[roblox] Example Game: right to erasure. Delete the data of user ${"9".repeat(20)}~.\nUniverses named: ?`,
+	);
+	assert.equal(
+		cut.robloxWebhookText({ EventType: "SampleNotification", EventPayload: { UserId: "9".repeat(30) } }),
+		`[roblox] Example Game: a test notification arrived (user ${"9".repeat(20)}~). The webhook works.`,
+	);
+	assert.equal(
+		cut.robloxWebhookText({
+			EventPayload: { AlertMessage: JSON.stringify({ summary: "s".repeat(300), metric: "m".repeat(100) }) },
+		}),
+		`[roblox] Example Game: Roblox alert: ${"s".repeat(200)}~ (${"m".repeat(80)}~)`,
+	);
+	assert.equal(robloxAlertText({ EventPayload: { AlertMessage: long } }, "~"), `Roblox alert: ${"x".repeat(400)}~`);
+	assert.equal(robloxAlertText({ EventPayload: { AlertMessage: long } }), `Roblox alert: ${"x".repeat(400)}...`);
+	// A rule with no text of its own says the context, cut the same way.
+	const [alert] = cut.alertsFor([{ event: "feed", ctx: { note: long } }], {
+		env: "live",
+		placeVersion: 3,
+		jobId: "j",
+	});
+	assert.equal(alert.text, `feed: ${JSON.stringify({ note: long }).slice(0, 160)}~ [v3]`);
+});
+
 test("a refund says every field Roblox sent, whatever they are called", () => {
 	const body = {
 		EventType: "TransactionRefunded",
