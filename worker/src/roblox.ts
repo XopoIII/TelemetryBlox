@@ -5,13 +5,14 @@
  * (`/roblox-alert?token=...`), a secret of its own.
  */
 
-import { field, type Resolved, short } from "./config.js";
+import { DEFAULTS, field, type Resolved, short } from "./config.js";
 
 /**
  * An analytics alert (Creator Hub, Alerts): `EventPayload.AlertMessage` is a JSON string with a
- * `summary` ("fired" or "recovered") and the `metric`. Whatever arrives is said, shortened.
+ * `summary` ("fired" or "recovered") and the `metric`. Whatever arrives is said, shortened, and a
+ * value that was cut ends with `cut`.
  */
-export function robloxAlertText(body: unknown): string {
+export function robloxAlertText(body: unknown, cut = DEFAULTS.marks.cut): string {
 	const payload = field(body, "EventPayload");
 	const raw = field(payload, "AlertMessage");
 	let message: unknown = raw;
@@ -25,17 +26,17 @@ export function robloxAlertText(body: unknown): string {
 	const summary = field(message, "summary");
 	const metric = field(message, "metric");
 	if (typeof summary === "string" || typeof metric === "string") {
-		return `Roblox alert: ${short(summary ?? "?", 200)} (${short(metric ?? "?", 80)})`;
+		return `Roblox alert: ${short(summary ?? "?", 200, cut)} (${short(metric ?? "?", 80, cut)})`;
 	}
-	return `Roblox alert: ${short(message ?? body, 400)}`;
+	return `Roblox alert: ${short(message ?? body, 400, cut)}`;
 }
 
 /** The top-level fields of a webhook's `EventPayload`, as `name: value` lines, ten at most. */
-function payloadLines(payload: unknown): string {
-	if (typeof payload !== "object" || payload === null) return short(payload, 300);
+function payloadLines(payload: unknown, cut: string): string {
+	if (typeof payload !== "object" || payload === null) return short(payload, 300, cut);
 	const lines = Object.entries(payload as Record<string, unknown>)
 		.slice(0, 10)
-		.map(([name, value]) => `${name}: ${short(value, 120)}`);
+		.map(([name, value]) => `${name}: ${short(value, 120, cut)}`);
 	return lines.length > 0 ? lines.join("\n") : "(no fields)";
 }
 
@@ -47,30 +48,34 @@ function payloadLines(payload: unknown): string {
  *     sends is said as it came.
  *   - `SampleNotification`: the dashboard's Test button.
  *   - anything else, an analytics alert among them: `robloxAlertText`.
+ *
+ * Each starts with what the game's `robloxPrefix` says of its kind: `marks.roblox` and the game's
+ * name, unless the game marks its kinds apart.
  */
 export function robloxWebhookText(config: Resolved, body: unknown): string {
-	const mark = config.marks.roblox;
+	const cut = config.marks.cut;
 	const type = field(body, "EventType");
 	const payload = field(body, "EventPayload");
 	if (type === "RightToErasureRequest") {
-		const user = short(field(payload, "UserId"), 20);
+		const user = short(field(payload, "UserId"), 20, cut);
 		const games = field(payload, "GameIds");
-		const where = Array.isArray(games) && games.length > 0 ? games.map((id) => short(id, 20)).join(", ") : "?";
+		const where = Array.isArray(games) && games.length > 0 ? games.map((id) => short(id, 20, cut)).join(", ") : "?";
 		const lines = [
-			`${mark} ${config.game}: right to erasure. Delete the data of user ${user}.`,
+			`${config.robloxPrefix("erasure")} right to erasure. Delete the data of user ${user}.`,
 			`Universes named: ${where}`,
 		];
 		if (config.erasureHint) lines.push(config.erasureHint(user));
 		return lines.join("\n");
 	}
 	if (type === "SampleNotification") {
-		return `${mark} ${config.game}: a test notification arrived (user ${short(field(payload, "UserId"), 20)}). The webhook works.`;
+		const user = short(field(payload, "UserId"), 20, cut);
+		return `${config.robloxPrefix("test")} a test notification arrived (user ${user}). The webhook works.`;
 	}
 	if (typeof type === "string" && /refund/i.test(type)) {
-		return `${mark} ${config.game}: a refund (${short(type, 60)})\n${payloadLines(payload)}`;
+		return `${config.robloxPrefix("refund")} a refund (${short(type, 60, cut)})\n${payloadLines(payload, cut)}`;
 	}
 	if (typeof type === "string" && type !== "AnalyticsAlert") {
-		return `${mark} ${config.game}: ${short(type, 60)}\n${payloadLines(payload)}`;
+		return `${config.robloxPrefix("event")} ${short(type, 60, cut)}\n${payloadLines(payload, cut)}`;
 	}
-	return `${mark} ${config.game}: ${robloxAlertText(body)}`;
+	return `${config.robloxPrefix("alert")} ${robloxAlertText(body, cut)}`;
 }

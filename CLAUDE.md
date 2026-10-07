@@ -1,7 +1,7 @@
 # TelemetryBlox - working notes
 
 TelemetryBlox is a Roblox game server's telemetry pipe and the Cloudflare Worker that receives it.
-It was extracted from the game Grabby Pit and is used by the owner's games in two ways: the pipe as
+It was extracted from a live game and is used by the owner's games in two ways: the pipe as
 a pinned pesde package (`xopoiii/telemetryblox`, target `roblox_server`), and the Worker as an npm
 package installed from this repository by git tag, which each game deploys as a project of its own.
 

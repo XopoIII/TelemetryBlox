@@ -52,6 +52,12 @@ Spec.test("a captured server error is an urgent row with its message, script, tr
 		world.errorHandlers[1]("attempt to index nil", "Script:12\nScript:40", "Server.World")
 	end
 	Spec.equal(#telemetry.recent(), 3, "the fourth is quiet")
+	-- Each reported one is said to the log as well, under the event's name: what happened on this server.
+	Spec.equal(world.warnings, {
+		{ id = "server_error", context = { script = "Server.World", message = "attempt to index nil", count = 1 } },
+		{ id = "server_error", context = { script = "Server.World", message = "attempt to index nil", count = 2 } },
+		{ id = "server_error", context = { script = "Server.World", message = "attempt to index nil", count = 3 } },
+	}, "the log lines")
 	Spec.equal(telemetry.recent()[1], {
 		seq = 1,
 		t = 1_800_000_000,
@@ -125,6 +131,21 @@ Spec.test("a failed post is said where the game asks, or to the engine's log by 
 	unconfigured.emit("feed")
 	unconfigured.flush()
 	Spec.equal(plain.warnings[1].id, "telemetry.send_retry", "the default log")
+end)
+
+Spec.test("a row's strings are cut at the limit the game set", function()
+	const world = World.new()
+	const telemetry = make(world, function(given: TelemetryBlox.Options<EventName>)
+		given.maxStringBytes = 5000
+		given.maxDepth = 2
+	end)
+	telemetry.captureErrors("server_error")
+	world.errorHandlers[1](string.rep("e", 6000), "", "Server.World")
+	telemetry.emit("feed", nil, { note = string.rep("n", 4000), deep = { deeper = { never = 1 }, at = 2 } })
+	const rows = telemetry.recent()
+	Spec.equal(#rows[1].ctx.message, 5000, "an error's message past the default thousand")
+	Spec.equal(#rows[2].ctx.note, 4000, "a long string whole")
+	Spec.equal(rows[2].ctx.deep, { at = 2 }, "and the depth")
 end)
 
 Spec.test("a wrong option is an error when the telemetry is made", function()

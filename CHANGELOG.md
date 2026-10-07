@@ -6,9 +6,34 @@ by the same tag.
 
 ## Unreleased
 
+## 0.2.0 - 2026-10-07
+
+### Added
+
+The pipe:
+- `maxStringBytes` and `maxDepth` options: the limits a row's context is copied under, 1000 bytes and
+  four levels as before unless the game says otherwise. A game whose rows carry a whole error message
+  raises the first. `Clean.context` takes the limits as a second argument, and `Clean.DEFAULTS` holds
+  the ones used without it.
+- A captured server error is also said to `log`, under the event's name, with its `script`, `message`
+  and `count`: the row answers whether it happens across servers, the log line what happened in this
+  one. The game the pipe came from always logged it; the package had dropped the line.
+
+The Worker:
+- `robloxPrefix(kind)`: what starts a Roblox webhook's message, by its kind (`erasure`, `test`,
+  `refund`, `event`, `alert`), in place of `marks.roblox` and the game's name. A game can mark an
+  obligation apart from a notice.
+- `marks.cut`: what ends a value that was cut short, three dots by default. `short` and
+  `robloxAlertText` take it as their last argument.
+
+### Changed
+
+- No file names a game any more: the tests' example game is called `example`, and the notes say
+  where the code came from without naming it.
+
 ## 0.1.0 - 2026-10-05
 
-The telemetry of Grabby Pit as a package: the same pipe and the same Worker, with every seam to the
+A live game's telemetry as a package: the same pipe and the same Worker, with every seam to the
 game cut. Nothing in this repository names a game's event, endpoint, secret or threshold.
 
 ### Added
@@ -46,7 +71,7 @@ The Worker (`worker/`, installed by git tag):
   (`worker/queries`), and `telemetryblox/testing` with `telemetryblox-check-queries`: a D1 over
   Node's SQLite for a game's tests, and a check that every saved query runs against the schema.
 
-### Changed from Grabby Pit's copy
+### Changed from the game's own copy
 
 The pipe:
 
@@ -71,7 +96,7 @@ The Worker:
 
 - The game's name, alert table, cool-downs, cap, scan thresholds, digest, retention, nightly hour,
   environments, body bounds, marks, and the names of its D1 binding and secrets are config. The
-  alert rules were a `switch` over Grabby Pit's events and the scan a fixed query over five of them.
+  alert rules were a `switch` over that game's events and the scan a fixed query over five of them.
 - A repeat of an alert in the very second the first was sent is held. It was sent twice: the gate
   told the two apart by the row's time, which is the same for both.
 - A batch that arrives twice raises its alerts once. A purchase, which is never held, was said
@@ -100,7 +125,7 @@ The Worker:
 - `emit` cannot know what a game writes into a context: an id or a name put there by hand leaves
   the server. The library keeps its own promise only (the actor, the envelope).
 - A listener given to `onEmit` that yields makes `emit` yield. It is documented, not prevented.
-- Grabby Pit's event vocabulary, its coverage check (every event emitted and documented), its
+- The game's event vocabulary, its coverage check (every event emitted and documented), its
   Roblox-analytics sink, its query files and its right-to-erasure script are a game's own and are
   not here. Neither is the script that sets an experience's secret through Open Cloud.
 - No Wally package, no `.rbxm`, no roblox-ts typings, and no npm registry package: the Worker is

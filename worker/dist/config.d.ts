@@ -84,7 +84,14 @@ export interface Marks {
     digest: string;
     notice: string;
     roblox: string;
+    /** What ends a value that was cut short. Three dots by default. */
+    cut: string;
 }
+/**
+ * What a Roblox webhook turned out to be: a right-to-erasure request, the dashboard's Test button,
+ * a refund, any other named event, or an analytics alert (and anything unrecognised).
+ */
+export type RobloxKind = "erasure" | "test" | "refund" | "event" | "alert";
 export interface WorkerConfig {
     /** The game's name, said in every message. A batch tagged for another game is refused. */
     game: string;
@@ -113,6 +120,11 @@ export interface WorkerConfig {
     /** Events a batch may hold. 2000 by default. */
     maxEvents?: number;
     marks?: Partial<Marks>;
+    /**
+     * What starts the message of a Roblox webhook, by its kind, in place of `marks.roblox` and the
+     * game's name: a game may mark an obligation (an erasure) apart from a notice.
+     */
+    robloxPrefix?: (kind: RobloxKind) => string;
     bindings?: Partial<BindingNames>;
     /** The line a right-to-erasure message ends with: what to run for this user. */
     erasureHint?: (userId: string) => string;
@@ -142,6 +154,7 @@ export interface Resolved {
     maxBodyBytes: number;
     maxEvents: number;
     marks: Marks;
+    robloxPrefix: (kind: RobloxKind) => string;
     names: BindingNames;
     erasureHint?: (userId: string) => string;
 }
@@ -161,8 +174,11 @@ export declare const DEFAULTS: {
 export declare const MAX_SCAN_RULES = 30;
 /** A field of a context, or undefined when there is no such context. */
 export declare function field(ctx: unknown, name: string): unknown;
-/** A value as a message says it: text as it is, anything else as JSON, cut at `limit`. */
-export declare function short(value: unknown, limit?: number): string;
+/**
+ * A value as a message says it: text as it is, anything else as JSON, cut at `limit` and ended with
+ * `cut` when it was longer (a game's own mark is `marks.cut`).
+ */
+export declare function short(value: unknown, limit?: number, cut?: string): string;
 /** A player as a message names them: the pseudonym, shortened. */
 export declare function who(actor: string | undefined): string;
 /** Checks a game's config and fills the defaults. Throws on the first thing that is wrong. */

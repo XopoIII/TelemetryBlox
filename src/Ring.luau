@@ -34,7 +34,7 @@ export type Config = {
 	size: number,
 	--> Rows the protected ring holds before it drops its oldest.
 	protectedSize: number,
-	--> Each event's priority. An event not listed is bulk.
+	--> Each event's priority. An event not listed waits as bulk; the front door refuses it before here.
 	priorities: { [string]: Priority },
 	--> Unix seconds.
 	now: () -> number,

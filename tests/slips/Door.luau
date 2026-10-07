@@ -48,9 +48,27 @@ const MUTANTS: { Mutant.Mutant } = {
 	},
 	{
 		file = "src/init.luau",
-		from = "const kept = Clean.context(context)",
+		from = "const kept = Clean.context(context, resolved.clean)",
 		to = "const kept = context or {}",
 		breaks = "a row keeps a clean copy of its context",
+	},
+	{
+		file = "src/init.luau",
+		from = "const kept = Clean.context(context, resolved.clean)",
+		to = "const kept = Clean.context(context)",
+		breaks = "a row's context is cut at the limits the game set",
+	},
+	{
+		file = "src/init.luau",
+		from = "\t\t\t\tworld.warn(event, { script = report.script, message = report.message, count = report.count })\n",
+		to = "",
+		breaks = "a captured error is said to the log",
+	},
+	{
+		file = "src/init.luau",
+		from = "world.warn(event, { script = report.script, message = report.message, count = report.count })",
+		to = "world.warn(event, { script = report.script, message = report.message, count = 1 })",
+		breaks = "the log line carries the error's count",
 	},
 	{
 		file = "src/init.luau",
