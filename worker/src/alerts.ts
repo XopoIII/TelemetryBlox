@@ -21,6 +21,8 @@ export interface Alert {
 	text: string;
 	/** Seconds the key stays quiet after it was sent. 0: never held. */
 	cooldown: number;
+	/** The channel it is sent to. Absent: the chat. */
+	channel?: string;
 }
 
 export interface BatchMeta {
@@ -55,6 +57,7 @@ export function alertsFor(config: Resolved, events: SeenEvent[], meta: BatchMeta
 				severity: rule.severity,
 				text: rule.text(event, actor),
 				cooldown: rule.cooldown,
+				...(rule.channel === undefined ? {} : { channel: rule.channel }),
 			};
 		} catch (error) {
 			// A game's rule that throws on a row it did not expect costs that alert, not the batch.
@@ -98,13 +101,29 @@ async function gate(config: Resolved, env: Env, alert: Alert, now: number): Prom
 }
 
 /**
- * One message to the chat. False when it did not go, for whatever reason; never throws. Without
- * the bot's token and the chat's id the message is written to the Worker's log and nothing else
- * happens: both are secrets of the Worker and are never in code.
+ * The bot's token and the chat's id a message for `channel` goes with: the channel's own when both
+ * of its secrets are set, the chat's otherwise. A channel the game named and has not set up yet is
+ * said in the log, by its name alone, and its messages still arrive.
  */
-export async function send(config: Resolved, env: Env, message: string): Promise<boolean> {
-	const token = secret(env, config.names.telegramToken);
-	const chat = secret(env, config.names.telegramChat);
+function addressOf(config: Resolved, env: Env, channel?: string): { token?: string; chat?: string } {
+	const named = channel === undefined ? undefined : config.channels.get(channel);
+	if (named) {
+		const token = secret(env, named.token);
+		const chat = secret(env, named.chat);
+		if (token && chat) return { token, chat };
+		console.log(JSON.stringify({ message: "alert_channel_unconfigured", channel }));
+	}
+	return { token: secret(env, config.names.telegramToken), chat: secret(env, config.names.telegramChat) };
+}
+
+/**
+ * One message to the chat, or to `channel` of the game's `channels`. False when it did not go, for
+ * whatever reason; never throws. Without the bot's token and the chat's id the message is written
+ * to the Worker's log and nothing else happens: both are secrets of the Worker and are never in
+ * code. A channel nobody declared is the chat.
+ */
+export async function send(config: Resolved, env: Env, message: string, channel?: string): Promise<boolean> {
+	const { token, chat } = addressOf(config, env, channel);
 	if (!token || !chat) {
 		console.log(JSON.stringify({ message: "alert_unconfigured", text: message }));
 		return false;
@@ -142,7 +161,8 @@ export async function deliver(
 			const released = await gate(config, env, alert, now);
 			if (released === null) continue;
 			const held = released > 0 ? ` (+${released} held since the last)` : "";
-			if (await send(config, env, `${config.marks[alert.severity]} ${config.game}: ${alert.text}${held}`)) sent++;
+			const said = `${config.marks[alert.severity]} ${config.game}: ${alert.text}${held}`;
+			if (await send(config, env, said, alert.channel)) sent++;
 		}
 	} catch (error) {
 		console.error(

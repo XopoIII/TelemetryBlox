@@ -5,7 +5,17 @@
  * (`/roblox-alert?token=...`), a secret of its own.
  */
 
-import { DEFAULTS, field, type Resolved, short } from "./config.js";
+import { DEFAULTS, field, type Resolved, type RobloxKind, short } from "./config.js";
+
+/** What a Roblox webhook's body turned out to be: its words and its channel both go by this. */
+export function robloxKind(body: unknown): RobloxKind {
+	const type = field(body, "EventType");
+	if (type === "RightToErasureRequest") return "erasure";
+	if (type === "SampleNotification") return "test";
+	if (typeof type === "string" && /refund/i.test(type)) return "refund";
+	if (typeof type === "string" && type !== "AnalyticsAlert") return "event";
+	return "alert";
+}
 
 /**
  * An analytics alert (Creator Hub, Alerts): `EventPayload.AlertMessage` is a JSON string with a
@@ -56,7 +66,8 @@ export function robloxWebhookText(config: Resolved, body: unknown): string {
 	const cut = config.marks.cut;
 	const type = field(body, "EventType");
 	const payload = field(body, "EventPayload");
-	if (type === "RightToErasureRequest") {
+	const kind = robloxKind(body);
+	if (kind === "erasure") {
 		const user = short(field(payload, "UserId"), 20, cut);
 		const games = field(payload, "GameIds");
 		const where = Array.isArray(games) && games.length > 0 ? games.map((id) => short(id, 20, cut)).join(", ") : "?";
@@ -67,14 +78,14 @@ export function robloxWebhookText(config: Resolved, body: unknown): string {
 		if (config.erasureHint) lines.push(config.erasureHint(user));
 		return lines.join("\n");
 	}
-	if (type === "SampleNotification") {
+	if (kind === "test") {
 		const user = short(field(payload, "UserId"), 20, cut);
 		return `${config.robloxPrefix("test")} a test notification arrived (user ${user}). The webhook works.`;
 	}
-	if (typeof type === "string" && /refund/i.test(type)) {
+	if (kind === "refund") {
 		return `${config.robloxPrefix("refund")} a refund (${short(type, 60, cut)})\n${payloadLines(payload, cut)}`;
 	}
-	if (typeof type === "string" && type !== "AnalyticsAlert") {
+	if (kind === "event") {
 		return `${config.robloxPrefix("event")} ${short(type, 60, cut)}\n${payloadLines(payload, cut)}`;
 	}
 	return `${config.robloxPrefix("alert")} ${robloxAlertText(body, cut)}`;

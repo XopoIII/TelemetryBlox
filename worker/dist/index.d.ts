@@ -25,9 +25,9 @@
 import { type Alert, type BatchMeta } from "./alerts.js";
 import { type Env, type Resolved, type SeenEvent, type WorkerConfig } from "./config.js";
 export type { Alert, BatchMeta } from "./alerts.js";
-export type { AlertRule, BindingNames, DigestConfig, DigestDay, Env, Marks, Resolved, RobloxKind, ScanRule, SeenEvent, Severity, WorkerConfig, } from "./config.js";
+export type { AlertRule, BindingNames, ChannelNames, DigestConfig, DigestDay, Env, Marks, Resolved, RobloxKind, ScanRule, SeenEvent, Severity, WorkerConfig, } from "./config.js";
 export { DEFAULTS, field, MAX_SCAN_RULES, short, who } from "./config.js";
-export { robloxAlertText } from "./roblox.js";
+export { robloxAlertText, robloxKind } from "./roblox.js";
 /** The Worker's parts over one game's config, for a game's own tests and tools. */
 export interface Kit {
     /** The config, checked, with its defaults filled. */
@@ -36,8 +36,8 @@ export interface Kit {
     alertsFor: (events: SeenEvent[], meta: BatchMeta) => Alert[];
     /** Sends the alerts their cool-downs allow. Returns how many went. */
     deliver: (env: Env, alerts: Alert[], now?: number) => Promise<number>;
-    /** One message to the chat. */
-    send: (env: Env, message: string) => Promise<boolean>;
+    /** One message to the chat, or to `channel` of the game's `channels`. */
+    send: (env: Env, message: string, channel?: string) => Promise<boolean>;
     /** The hourly scan. */
     anomalies: (env: Env) => Promise<Record<string, unknown>>;
     /** Yesterday's digest. */
@@ -48,6 +48,8 @@ export interface Kit {
     isNightly: (scheduledTime: number) => boolean;
     /** What a Roblox webhook's body says, as a message. */
     robloxWebhookText: (body: unknown) => string;
+    /** The channel a Roblox webhook's body is sent to, by the game's `robloxChannel`; undefined: the chat. */
+    robloxWebhookChannel: (body: unknown) => string | undefined;
 }
 /** Checks a game's config (it throws on a wrong one, when the Worker loads) and binds the parts to it. */
 export declare function createKit(given: WorkerConfig): Kit;

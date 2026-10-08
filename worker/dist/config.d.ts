@@ -28,6 +28,16 @@ export interface AlertRule {
     text?: (event: SeenEvent, who: string) => string;
     /** Seconds a repeat is held, in place of the severity's. 0: never held. */
     cooldownSeconds?: number;
+    /** The channel of `channels` this alert is sent to. Absent: the chat. */
+    channel?: string;
+}
+/**
+ * Another chat of the game's, by what its two secrets are called: a bot's token and a chat's id.
+ * The values are secrets of the Worker, as the chat's own are.
+ */
+export interface ChannelNames {
+    token: string;
+    chat: string;
 }
 /** One thing the hourly scan counts for each player, and the count that is worth a message. */
 export interface ScanRule {
@@ -125,6 +135,14 @@ export interface WorkerConfig {
      * game's name: a game may mark an obligation (an erasure) apart from a notice.
      */
     robloxPrefix?: (kind: RobloxKind) => string;
+    /**
+     * More chats than the one, by name: a game may keep its purchases apart from its faults. An
+     * alert rule or a webhook kind that names one is sent there; everything else goes to the chat.
+     * A channel whose secrets are not set sends to the chat, so a message is never lost to it.
+     */
+    channels?: Record<string, ChannelNames>;
+    /** The channel a Roblox webhook of a kind is sent to. Absent, or nothing for a kind: the chat. */
+    robloxChannel?: (kind: RobloxKind) => string | undefined;
     bindings?: Partial<BindingNames>;
     /** The line a right-to-erasure message ends with: what to run for this user. */
     erasureHint?: (userId: string) => string;
@@ -135,6 +153,7 @@ export interface ResolvedRule {
     kind: (event: SeenEvent, who: string) => string;
     text: (event: SeenEvent, who: string) => string;
     cooldown: number;
+    channel?: string;
 }
 export interface Resolved {
     game: string;
@@ -155,6 +174,8 @@ export interface Resolved {
     maxEvents: number;
     marks: Marks;
     robloxPrefix: (kind: RobloxKind) => string;
+    channels: Map<string, ChannelNames>;
+    robloxChannel: (kind: RobloxKind) => string | undefined;
     names: BindingNames;
     erasureHint?: (userId: string) => string;
 }

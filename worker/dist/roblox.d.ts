@@ -4,7 +4,9 @@
  * Roblox posts to a URL and sends no header of ours, so the door is opened by a token in the URL
  * (`/roblox-alert?token=...`), a secret of its own.
  */
-import { type Resolved } from "./config.js";
+import { type Resolved, type RobloxKind } from "./config.js";
+/** What a Roblox webhook's body turned out to be: its words and its channel both go by this. */
+export declare function robloxKind(body: unknown): RobloxKind;
 /**
  * An analytics alert (Creator Hub, Alerts): `EventPayload.AlertMessage` is a JSON string with a
  * `summary` ("fired" or "recovered") and the `metric`. Whatever arrives is said, shortened, and a

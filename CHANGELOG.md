@@ -6,6 +6,22 @@ by the same tag.
 
 ## Unreleased
 
+## 0.3.0 - 2026-10-08
+
+### Added
+
+The Worker:
+- `channels`: more chats than the one, each named by the two secrets of its own bot and chat. An
+  alert rule's `channel` sends its alert there, and `robloxChannel(kind)` a Roblox webhook of that
+  kind. A game can keep its purchases and refunds apart from its faults. A channel either of whose
+  secrets is not set sends to the chat and logs `alert_channel_unconfigured` with its name; a rule
+  that names a channel the config does not hold fails as the Worker is made.
+- `Kit.send` takes the channel as its third argument, and `Kit.robloxWebhookChannel(body)` says where
+  a webhook's body goes. `robloxKind(body)` is exported: the kind a webhook's words and its channel
+  both go by. `Alert` carries `channel`, and the `ChannelNames` type is exported.
+
+Nothing changes for a game that names no channel.
+
 ## 0.2.0 - 2026-10-07
 
 ### Added

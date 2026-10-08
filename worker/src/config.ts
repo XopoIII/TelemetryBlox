@@ -31,6 +31,17 @@ export interface AlertRule {
 	text?: (event: SeenEvent, who: string) => string;
 	/** Seconds a repeat is held, in place of the severity's. 0: never held. */
 	cooldownSeconds?: number;
+	/** The channel of `channels` this alert is sent to. Absent: the chat. */
+	channel?: string;
+}
+
+/**
+ * Another chat of the game's, by what its two secrets are called: a bot's token and a chat's id.
+ * The values are secrets of the Worker, as the chat's own are.
+ */
+export interface ChannelNames {
+	token: string;
+	chat: string;
 }
 
 /** One thing the hourly scan counts for each player, and the count that is worth a message. */
@@ -135,6 +146,14 @@ export interface WorkerConfig {
 	 * game's name: a game may mark an obligation (an erasure) apart from a notice.
 	 */
 	robloxPrefix?: (kind: RobloxKind) => string;
+	/**
+	 * More chats than the one, by name: a game may keep its purchases apart from its faults. An
+	 * alert rule or a webhook kind that names one is sent there; everything else goes to the chat.
+	 * A channel whose secrets are not set sends to the chat, so a message is never lost to it.
+	 */
+	channels?: Record<string, ChannelNames>;
+	/** The channel a Roblox webhook of a kind is sent to. Absent, or nothing for a kind: the chat. */
+	robloxChannel?: (kind: RobloxKind) => string | undefined;
 	bindings?: Partial<BindingNames>;
 	/** The line a right-to-erasure message ends with: what to run for this user. */
 	erasureHint?: (userId: string) => string;
@@ -146,6 +165,7 @@ export interface ResolvedRule {
 	kind: (event: SeenEvent, who: string) => string;
 	text: (event: SeenEvent, who: string) => string;
 	cooldown: number;
+	channel?: string;
 }
 
 export interface Resolved {
@@ -164,6 +184,8 @@ export interface Resolved {
 	maxEvents: number;
 	marks: Marks;
 	robloxPrefix: (kind: RobloxKind) => string;
+	channels: Map<string, ChannelNames>;
+	robloxChannel: (kind: RobloxKind) => string | undefined;
 	names: BindingNames;
 	erasureHint?: (userId: string) => string;
 }
@@ -242,9 +264,12 @@ function rule(
 	given: Severity | AlertRule,
 	cooldown: Record<Severity, number>,
 	cut: string,
+	channels: Map<string, ChannelNames>,
 ): ResolvedRule {
 	const from: AlertRule = typeof given === "string" ? { severity: given } : given;
 	if (!(from.severity in cooldown)) fail(`the alert for ${name} has no such severity: ${String(from.severity)}`);
+	if (from.channel !== undefined && !channels.has(from.channel))
+		fail(`the alert for ${name} names a channel that \`channels\` does not hold: ${String(from.channel)}`);
 	const per = from.per ?? "event";
 	return {
 		severity: from.severity,
@@ -259,6 +284,7 @@ function rule(
 			from.text ??
 			((event, actor) => `${name}: ${short(event.ctx, 160, cut)}${event.actor ? `, player ${actor}` : ""}`),
 		cooldown: seconds(from.cooldownSeconds, cooldown[from.severity], `alerts.${name}.cooldownSeconds`),
+		channel: from.channel,
 	};
 }
 
@@ -275,9 +301,18 @@ export function resolve(config: WorkerConfig): Resolved {
 		info: seconds(config.cooldownSeconds?.info, DEFAULTS.cooldownSeconds.info, "cooldownSeconds.info"),
 	};
 	const marks: Marks = { ...DEFAULTS.marks, ...config.marks };
+	const channels = new Map<string, ChannelNames>();
+	for (const [name, given] of Object.entries(config.channels ?? {})) {
+		if (!WORD.test(name)) fail(`a channel's name must be a word: ${name}`);
+		for (const part of ["token", "chat"] as const) {
+			if (typeof given?.[part] !== "string" || given[part] === "")
+				fail(`the channel ${name} must name the secret of its ${part}`);
+		}
+		channels.set(name, { token: given.token, chat: given.chat });
+	}
 	const rules = new Map<string, ResolvedRule>();
 	for (const [name, given] of Object.entries(config.alerts ?? {})) {
-		rules.set(name, rule(name, given, cooldown, marks.cut));
+		rules.set(name, rule(name, given, cooldown, marks.cut, channels));
 	}
 
 	const scan = config.scan ?? [];
@@ -320,6 +355,8 @@ export function resolve(config: WorkerConfig): Resolved {
 		maxEvents: positive(config.maxEvents, DEFAULTS.maxEvents, "maxEvents"),
 		marks,
 		robloxPrefix: config.robloxPrefix ?? (() => `${marks.roblox} ${config.game}:`),
+		channels,
+		robloxChannel: config.robloxChannel ?? (() => undefined),
 		names: { ...DEFAULTS.bindings, ...config.bindings },
 		erasureHint: config.erasureHint,
 	};
