@@ -18,7 +18,7 @@ TelemetryBlox is two things in one repository:
 It was built and used inside a live game before it became a package, and holds nothing of any
 game: every event name, endpoint, secret's name, alert rule and threshold is handed in.
 
-> **Status: 0.2.0.** The pipe's rules are proven by 78 specs that run off Roblox on LuneBlox, and
+> **Status: 0.3.0.** The pipe's rules are proven by 78 specs that run off Roblox on LuneBlox, and
 > each of 163 small slips in the code makes the suite fail (`tests/Mutate.luau`). The Worker's 64
 > tests run against Node's own SQLite, which D1 is. **As a package it has not yet run in a Roblox
 > server or on Cloudflare:** the engine adapter (`src/RobloxServices.luau`) is checked against the
@@ -35,7 +35,7 @@ or pin it exactly in `pesde.toml`:
 
 ```toml
 [dependencies]
-TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.2.0", target = "roblox_server" }
+TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.3.0", target = "roblox_server" }
 ```
 
 It has no dependencies. The experience needs **Allow HTTP Requests** on.
@@ -179,7 +179,7 @@ telemetry/
 		"deploy": "wrangler deploy"
 	},
 	"dependencies": {
-		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.2.0"
+		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.3.0"
 	},
 	"devDependencies": {
 		"wrangler": "4.147.0"
@@ -259,6 +259,8 @@ migrations, the example queries and the testing helpers ride in the same package
 | `maxBodyBytes`, `maxEvents` | 1,000,000, 2000 | The bounds on a body |
 | `marks` | `[critical]` `[warning]` `[info]` `[digest]` `[notice]` `[roblox]`, and `cut`: `...` | What starts each kind of message, and what ends a value that was cut short |
 | `robloxPrefix` | `marks.roblox` and the game's name | `(kind) => string`: what starts a Roblox webhook's message, by its kind (`erasure`, `test`, `refund`, `event`, `alert`) |
+| `channels` | none | More chats than the one, by name: `{ money: { token: "MONEY_BOT_TOKEN", chat: "MONEY_CHAT_ID" } }` names the two secrets of another bot and chat. An alert rule with `channel: "money"` is sent there |
+| `robloxChannel` | none: every webhook to the chat | `(kind) => string \| undefined`: the channel a Roblox webhook of a kind is sent to |
 | `bindings` | `DB`, `INGEST_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ALERT_TOKEN` | What the D1 binding and each secret are called |
 | `erasureHint` | none | The line a right-to-erasure message ends with |
 
@@ -279,6 +281,14 @@ first, ending with the place version. A repeat of the same kind inside its cool-
 counted, and the next one past it says `(+N held since the last)`. A kind with no cool-down is never
 held. A batch sends eight at most. A batch from Studio or a test place alerts nobody. A Telegram
 outage never costs a batch: it is stored first.
+
+**A game may keep some messages apart**, its purchases from its faults, say. `channels` names
+another bot and chat by their two secrets, a rule's `channel` sends its alert there, and
+`robloxChannel` does the same for a kind of Roblox webhook. The scan, the digest and a notice go to
+the chat. A channel either of whose secrets is not set sends to the chat and writes
+`alert_channel_unconfigured` with its name to the log, so the config can be deployed before the
+secrets are put and no message is lost in between. A rule that names a channel `channels` does not
+hold is a wrong config, and throws as the Worker loads.
 
 **Every hour** the scan reads the live batches since its last run and says who stood at a limit.
 **Every night** the job rolls each finished day up into `events_daily`, keeps who was first seen when
@@ -341,6 +351,9 @@ does not answer fills its protected ring with drop rows.
 3. Set both as secrets of the Worker (step 3 above). They are never written in a repository, in a
    game's env file or in the experience's secrets.
 4. Try it: `curl -s -X POST -H "x-api-key: $TELEMETRY_INGEST_KEY" --data '{"text":"hello"}' https://<worker host>/notify`.
+
+A channel of `channels` is set up the same way, with a bot and a chat of its own and the two secret
+names the game gave it in the config.
 
 Without them the Worker writes what it would have sent to its log (`alert_unconfigured`) and
 everything else works as before.

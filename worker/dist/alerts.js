@@ -39,6 +39,7 @@ export function alertsFor(config, events, meta) {
                 severity: rule.severity,
                 text: rule.text(event, actor),
                 cooldown: rule.cooldown,
+                ...(rule.channel === undefined ? {} : { channel: rule.channel }),
             };
         }
         catch (error) {
@@ -81,13 +82,29 @@ async function gate(config, env, alert, now) {
     return row && row.held === 0 ? row.released : null;
 }
 /**
- * One message to the chat. False when it did not go, for whatever reason; never throws. Without
- * the bot's token and the chat's id the message is written to the Worker's log and nothing else
- * happens: both are secrets of the Worker and are never in code.
+ * The bot's token and the chat's id a message for `channel` goes with: the channel's own when both
+ * of its secrets are set, the chat's otherwise. A channel the game named and has not set up yet is
+ * said in the log, by its name alone, and its messages still arrive.
  */
-export async function send(config, env, message) {
-    const token = secret(env, config.names.telegramToken);
-    const chat = secret(env, config.names.telegramChat);
+function addressOf(config, env, channel) {
+    const named = channel === undefined ? undefined : config.channels.get(channel);
+    if (named) {
+        const token = secret(env, named.token);
+        const chat = secret(env, named.chat);
+        if (token && chat)
+            return { token, chat };
+        console.log(JSON.stringify({ message: "alert_channel_unconfigured", channel }));
+    }
+    return { token: secret(env, config.names.telegramToken), chat: secret(env, config.names.telegramChat) };
+}
+/**
+ * One message to the chat, or to `channel` of the game's `channels`. False when it did not go, for
+ * whatever reason; never throws. Without the bot's token and the chat's id the message is written
+ * to the Worker's log and nothing else happens: both are secrets of the Worker and are never in
+ * code. A channel nobody declared is the chat.
+ */
+export async function send(config, env, message, channel) {
+    const { token, chat } = addressOf(config, env, channel);
     if (!token || !chat) {
         console.log(JSON.stringify({ message: "alert_unconfigured", text: message }));
         return false;
@@ -119,7 +136,8 @@ export async function deliver(config, env, alerts, now = Math.floor(Date.now() /
             if (released === null)
                 continue;
             const held = released > 0 ? ` (+${released} held since the last)` : "";
-            if (await send(config, env, `${config.marks[alert.severity]} ${config.game}: ${alert.text}${held}`))
+            const said = `${config.marks[alert.severity]} ${config.game}: ${alert.text}${held}`;
+            if (await send(config, env, said, alert.channel))
                 sent++;
         }
     }

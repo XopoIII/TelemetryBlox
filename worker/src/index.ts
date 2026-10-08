@@ -27,13 +27,14 @@ import { type Alert, alertsFor, type BatchMeta, deliver, pruneAlertState, send }
 import { type Env, type Resolved, resolve, type SeenEvent, secret, type WorkerConfig } from "./config.js";
 import { asText, authorised, ingest, json, secretsMatch } from "./ingest.js";
 import { freshness, retention } from "./retention.js";
-import { robloxWebhookText } from "./roblox.js";
+import { robloxKind, robloxWebhookText } from "./roblox.js";
 import { anomalies, digest } from "./scan.js";
 
 export type { Alert, BatchMeta } from "./alerts.js";
 export type {
 	AlertRule,
 	BindingNames,
+	ChannelNames,
 	DigestConfig,
 	DigestDay,
 	Env,
@@ -46,7 +47,7 @@ export type {
 	WorkerConfig,
 } from "./config.js";
 export { DEFAULTS, field, MAX_SCAN_RULES, short, who } from "./config.js";
-export { robloxAlertText } from "./roblox.js";
+export { robloxAlertText, robloxKind } from "./roblox.js";
 
 /** The Worker's parts over one game's config, for a game's own tests and tools. */
 export interface Kit {
@@ -56,8 +57,8 @@ export interface Kit {
 	alertsFor: (events: SeenEvent[], meta: BatchMeta) => Alert[];
 	/** Sends the alerts their cool-downs allow. Returns how many went. */
 	deliver: (env: Env, alerts: Alert[], now?: number) => Promise<number>;
-	/** One message to the chat. */
-	send: (env: Env, message: string) => Promise<boolean>;
+	/** One message to the chat, or to `channel` of the game's `channels`. */
+	send: (env: Env, message: string, channel?: string) => Promise<boolean>;
 	/** The hourly scan. */
 	anomalies: (env: Env) => Promise<Record<string, unknown>>;
 	/** Yesterday's digest. */
@@ -68,6 +69,8 @@ export interface Kit {
 	isNightly: (scheduledTime: number) => boolean;
 	/** What a Roblox webhook's body says, as a message. */
 	robloxWebhookText: (body: unknown) => string;
+	/** The channel a Roblox webhook's body is sent to, by the game's `robloxChannel`; undefined: the chat. */
+	robloxWebhookChannel: (body: unknown) => string | undefined;
 }
 
 /** Checks a game's config (it throws on a wrong one, when the Worker loads) and binds the parts to it. */
@@ -77,12 +80,13 @@ export function createKit(given: WorkerConfig): Kit {
 		config,
 		alertsFor: (events, meta) => alertsFor(config, events, meta),
 		deliver: (env, alerts, now) => deliver(config, env, alerts, now),
-		send: (env, message) => send(config, env, message),
+		send: (env, message, channel) => send(config, env, message, channel),
 		anomalies: (env) => anomalies(config, env),
 		digest: (env) => digest(config, env),
 		retention: (env) => retention(config, env),
 		isNightly: (scheduledTime) => new Date(scheduledTime).getUTCHours() === config.nightlyHourUtc,
 		robloxWebhookText: (body) => robloxWebhookText(config, body),
+		robloxWebhookChannel: (body) => config.robloxChannel(robloxKind(body)),
 	};
 }
 
@@ -106,7 +110,8 @@ export function createWorker(given: WorkerConfig): ExportedHandler<Env> {
 				return json({ error: "unauthorized" }, 401);
 			if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 			const body = await request.json().catch(() => null);
-			return json({ ok: true, sent: await kit.send(env, kit.robloxWebhookText(body)) });
+			const sent = await kit.send(env, kit.robloxWebhookText(body), kit.robloxWebhookChannel(body));
+			return json({ ok: true, sent });
 		}
 		if (url.pathname === "/health" && url.searchParams.get("deep") !== "1") return json({ ok: true });
 		if (!["/ingest", "/health", "/retention", "/anomalies", "/notify"].includes(url.pathname)) {

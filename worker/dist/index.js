@@ -26,10 +26,10 @@ import { alertsFor, deliver, pruneAlertState, send } from "./alerts.js";
 import { resolve, secret } from "./config.js";
 import { asText, authorised, ingest, json, secretsMatch } from "./ingest.js";
 import { freshness, retention } from "./retention.js";
-import { robloxWebhookText } from "./roblox.js";
+import { robloxKind, robloxWebhookText } from "./roblox.js";
 import { anomalies, digest } from "./scan.js";
 export { DEFAULTS, field, MAX_SCAN_RULES, short, who } from "./config.js";
-export { robloxAlertText } from "./roblox.js";
+export { robloxAlertText, robloxKind } from "./roblox.js";
 /** Checks a game's config (it throws on a wrong one, when the Worker loads) and binds the parts to it. */
 export function createKit(given) {
     const config = resolve(given);
@@ -37,12 +37,13 @@ export function createKit(given) {
         config,
         alertsFor: (events, meta) => alertsFor(config, events, meta),
         deliver: (env, alerts, now) => deliver(config, env, alerts, now),
-        send: (env, message) => send(config, env, message),
+        send: (env, message, channel) => send(config, env, message, channel),
         anomalies: (env) => anomalies(config, env),
         digest: (env) => digest(config, env),
         retention: (env) => retention(config, env),
         isNightly: (scheduledTime) => new Date(scheduledTime).getUTCHours() === config.nightlyHourUtc,
         robloxWebhookText: (body) => robloxWebhookText(config, body),
+        robloxWebhookChannel: (body) => config.robloxChannel(robloxKind(body)),
     };
 }
 function logged(message) {
@@ -63,7 +64,8 @@ export function createWorker(given) {
             if (request.method !== "POST")
                 return json({ error: "method_not_allowed" }, 405);
             const body = await request.json().catch(() => null);
-            return json({ ok: true, sent: await kit.send(env, kit.robloxWebhookText(body)) });
+            const sent = await kit.send(env, kit.robloxWebhookText(body), kit.robloxWebhookChannel(body));
+            return json({ ok: true, sent });
         }
         if (url.pathname === "/health" && url.searchParams.get("deep") !== "1")
             return json({ ok: true });

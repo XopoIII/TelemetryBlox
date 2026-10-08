@@ -68,10 +68,12 @@ function seconds(value, fallback, name) {
         fail(`\`${name}\` must be zero or more seconds`);
     return value;
 }
-function rule(name, given, cooldown, cut) {
+function rule(name, given, cooldown, cut, channels) {
     const from = typeof given === "string" ? { severity: given } : given;
     if (!(from.severity in cooldown))
         fail(`the alert for ${name} has no such severity: ${String(from.severity)}`);
+    if (from.channel !== undefined && !channels.has(from.channel))
+        fail(`the alert for ${name} names a channel that \`channels\` does not hold: ${String(from.channel)}`);
     const per = from.per ?? "event";
     return {
         severity: from.severity,
@@ -84,6 +86,7 @@ function rule(name, given, cooldown, cut) {
         text: from.text ??
             ((event, actor) => `${name}: ${short(event.ctx, 160, cut)}${event.actor ? `, player ${actor}` : ""}`),
         cooldown: seconds(from.cooldownSeconds, cooldown[from.severity], `alerts.${name}.cooldownSeconds`),
+        channel: from.channel,
     };
 }
 /** Checks a game's config and fills the defaults. Throws on the first thing that is wrong. */
@@ -96,9 +99,19 @@ export function resolve(config) {
         info: seconds(config.cooldownSeconds?.info, DEFAULTS.cooldownSeconds.info, "cooldownSeconds.info"),
     };
     const marks = { ...DEFAULTS.marks, ...config.marks };
+    const channels = new Map();
+    for (const [name, given] of Object.entries(config.channels ?? {})) {
+        if (!WORD.test(name))
+            fail(`a channel's name must be a word: ${name}`);
+        for (const part of ["token", "chat"]) {
+            if (typeof given?.[part] !== "string" || given[part] === "")
+                fail(`the channel ${name} must name the secret of its ${part}`);
+        }
+        channels.set(name, { token: given.token, chat: given.chat });
+    }
     const rules = new Map();
     for (const [name, given] of Object.entries(config.alerts ?? {})) {
-        rules.set(name, rule(name, given, cooldown, marks.cut));
+        rules.set(name, rule(name, given, cooldown, marks.cut, channels));
     }
     const scan = config.scan ?? [];
     if (scan.length > MAX_SCAN_RULES)
@@ -142,6 +155,8 @@ export function resolve(config) {
         maxEvents: positive(config.maxEvents, DEFAULTS.maxEvents, "maxEvents"),
         marks,
         robloxPrefix: config.robloxPrefix ?? (() => `${marks.roblox} ${config.game}:`),
+        channels,
+        robloxChannel: config.robloxChannel ?? (() => undefined),
         names: { ...DEFAULTS.bindings, ...config.bindings },
         erasureHint: config.erasureHint,
     };

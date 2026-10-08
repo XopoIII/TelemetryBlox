@@ -19,6 +19,8 @@ export interface Alert {
     text: string;
     /** Seconds the key stays quiet after it was sent. 0: never held. */
     cooldown: number;
+    /** The channel it is sent to. Absent: the chat. */
+    channel?: string;
 }
 export interface BatchMeta {
     env: string;
@@ -33,11 +35,12 @@ export declare function bySeverity(alerts: Alert[]): Alert[];
  */
 export declare function alertsFor(config: Resolved, events: SeenEvent[], meta: BatchMeta): Alert[];
 /**
- * One message to the chat. False when it did not go, for whatever reason; never throws. Without
- * the bot's token and the chat's id the message is written to the Worker's log and nothing else
- * happens: both are secrets of the Worker and are never in code.
+ * One message to the chat, or to `channel` of the game's `channels`. False when it did not go, for
+ * whatever reason; never throws. Without the bot's token and the chat's id the message is written
+ * to the Worker's log and nothing else happens: both are secrets of the Worker and are never in
+ * code. A channel nobody declared is the chat.
  */
-export declare function send(config: Resolved, env: Env, message: string): Promise<boolean>;
+export declare function send(config: Resolved, env: Env, message: string, channel?: string): Promise<boolean>;
 /** Sends the alerts their cool-downs allow, `maxAlerts` of them at most. Returns how many went. */
 export declare function deliver(config: Resolved, env: Env, alerts: Alert[], now?: number): Promise<number>;
 /** Old cool-down rows, dropped nightly: a key not sent for a week starts over. */
