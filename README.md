@@ -256,6 +256,7 @@ migrations, the example queries and the testing helpers ride in the same package
 | `scan` | none | The hourly scan: for each player, the `rows` of an event, the `sum` of a context field or its `max`, and the `limit` at or over which somebody is told |
 | `digest` | the events of `alerts` | `{ events, text }`, or `false` for no digest |
 | `retentionDays` | 60 | Days raw batches are kept |
+| `alertStateDays` | 7 | Days an alert's cool-down state is kept after it last went |
 | `maxRawEvents` | 2,000,000 | Raw events kept whatever their age (about 300 MB) |
 | `nightlyHourUtc` | 3 | The hourly run that is also the nightly one |
 | `environments` | `live`, `studio`, `test` | What a batch may call its server. Only `live` alerts |

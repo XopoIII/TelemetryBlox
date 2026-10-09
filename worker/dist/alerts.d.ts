@@ -43,5 +43,5 @@ export declare function alertsFor(config: Resolved, events: SeenEvent[], meta: B
 export declare function send(config: Resolved, env: Env, message: string, channel?: string): Promise<boolean>;
 /** Sends the alerts their cool-downs allow, `maxAlerts` of them at most. Returns how many went. */
 export declare function deliver(config: Resolved, env: Env, alerts: Alert[], now?: number): Promise<number>;
-/** Old cool-down rows, dropped nightly: a key not sent for a week starts over. */
+/** Old cool-down rows, dropped nightly: a key not sent for `alertStateDays` starts over. */
 export declare function pruneAlertState(config: Resolved, env: Env): Promise<void>;

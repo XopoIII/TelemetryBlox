@@ -396,6 +396,7 @@ test("a config that is wrong fails when the Worker is made, not on the first bat
 	wrong({ game: "" }, "`game` must be a non-empty string");
 	wrong({ game: "x", alerts: { boom: "loud" } }, "the alert for boom has no such severity: loud");
 	wrong({ game: "x", retentionDays: 0 }, "`retentionDays` must be a positive number");
+	wrong({ game: "x", alertStateDays: -2 }, "`alertStateDays` must be a positive number");
 	wrong({ game: "x", maxAlertsPerBatch: -1 }, "`maxAlertsPerBatch` must be a positive number");
 	wrong({ game: "x", maxBatchesPerMinute: 0 }, "`maxBatchesPerMinute` must be a positive number");
 	wrong({ game: "x", maxServerBatchesPerMinute: -1 }, "`maxServerBatchesPerMinute` must be a positive number");
