@@ -1,4 +1,7 @@
 # The same gates lefthook runs before a commit and before a push. Keep the two in step.
+#
+# The `secrets` job is the one exception: gitleaks is not a rokit pin, so it runs here only. A
+# secret found after the push is late already, but the run is what makes the rule visible.
 name: Checks
 
 on:
@@ -10,6 +13,21 @@ permissions:
   contents: read
 
 jobs:
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Scan for secrets
+        run: |
+          curl -fsSL -o /tmp/gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks git --redact .
+
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
