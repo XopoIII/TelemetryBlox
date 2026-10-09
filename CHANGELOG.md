@@ -9,6 +9,10 @@ by the same tag.
 ### Changed
 
 The pipe:
+- The ring no longer shifts its array when a full tier drops its oldest row: a tier is an array and
+  a head, eviction is a step of the head, and the spent rows are moved over once they outnumber the
+  waiting ones. An emit into a full ring under a flood now costs what an emit into an empty one
+  costs.
 - A context table with an array part now keeps its string keys too: a mixed table was kept as its
   array alone, and half a row could vanish without a trace.
 - Option checks at boot are stricter, so a mistake is an error at boot and not a silence later:
