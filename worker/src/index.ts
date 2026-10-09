@@ -25,7 +25,7 @@
 
 import { type Alert, alertsFor, type BatchMeta, deliver, pruneAlertState, send } from "./alerts.js";
 import { type Env, type Resolved, resolve, type SeenEvent, secret, type WorkerConfig } from "./config.js";
-import { asText, authorised, ingest, json, secretsMatch } from "./ingest.js";
+import { asText, authorised, createLimiter, ingest, json, secretsMatch } from "./ingest.js";
 import { freshness, retention } from "./retention.js";
 import { robloxKind, robloxWebhookText } from "./roblox.js";
 import { anomalies, digest } from "./scan.js";
@@ -47,6 +47,7 @@ export type {
 	WorkerConfig,
 } from "./config.js";
 export { DEFAULTS, field, MAX_SCAN_RULES, short, who } from "./config.js";
+export { SCHEMA_VERSION } from "./ingest.js";
 export { robloxAlertText, robloxKind } from "./roblox.js";
 
 /** The Worker's parts over one game's config, for a game's own tests and tools. */
@@ -98,6 +99,8 @@ function logged(message: string) {
 export function createWorker(given: WorkerConfig): ExportedHandler<Env> {
 	const kit = createKit(given);
 	const { config } = kit;
+	// One limiter for the Worker's life: its counts are the state the bound on posts is kept in.
+	const limiter = createLimiter(config);
 
 	async function route(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
@@ -119,7 +122,7 @@ export function createWorker(given: WorkerConfig): ExportedHandler<Env> {
 		}
 		if (url.pathname === "/ingest") {
 			if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
-			return ingest(config, request, env, ctx);
+			return ingest(config, request, env, ctx, limiter);
 		}
 
 		// Every other door needs the key: they read the data, delete rows or write to the chat.

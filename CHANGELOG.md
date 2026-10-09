@@ -6,6 +6,15 @@ by the same tag.
 
 ## Unreleased
 
+### Added
+
+The Worker:
+- The ingest refuses a batch whose `schemaVersion` is newer than it reads, with a 400 that says so,
+  instead of storing it half-understood. An older pipe keeps working against an updated Worker.
+- `maxBatchesPerMinute` (1,200) and `maxServerBatchesPerMinute` (60): a bound on how fast batches
+  may arrive, over every server and from one, by job id. The surplus is refused with a 429, which
+  the pipe holds and posts again. The counts live in the Worker's memory, so the bound costs no
+  written rows and is per isolate, best-effort. `SCHEMA_VERSION` is exported.
 ### Changed
 
 The pipe:

@@ -260,6 +260,7 @@ migrations, the example queries and the testing helpers ride in the same package
 | `nightlyHourUtc` | 3 | The hourly run that is also the nightly one |
 | `environments` | `live`, `studio`, `test` | What a batch may call its server. Only `live` alerts |
 | `maxBodyBytes`, `maxEvents` | 1,000,000, 2000 | The bounds on a body |
+| `maxBatchesPerMinute`, `maxServerBatchesPerMinute` | 1,200, 60 | How fast batches may arrive, over every server and from one (by job id). The surplus is refused with a 429, which the pipe holds and posts again |
 | `marks` | `[critical]` `[warning]` `[info]` `[digest]` `[notice]` `[roblox]`, and `cut`: `...` | What starts each kind of message, and what ends a value that was cut short |
 | `robloxPrefix` | `marks.roblox` and the game's name | `(kind) => string`: what starts a Roblox webhook's message, by its kind (`erasure`, `test`, `refund`, `event`, `alert`) |
 | `channels` | none | More chats than the one, by name: `{ money: { token: "MONEY_BOT_TOKEN", chat: "MONEY_CHAT_ID" } }` names the two secrets of another bot and chat. An alert rule with `channel: "money"` is sent there |
@@ -273,7 +274,7 @@ A wrong config throws when the Worker loads, not on the first batch.
 
 | Door | |
 |---|---|
-| `POST /ingest` | A batch, with the key in `x-api-key`. Checks the key in constant time, bounds the body, stores the batch as one row, and stores it once however often it arrives |
+| `POST /ingest` | A batch, with the key in `x-api-key`. Checks the key in constant time, bounds the body, refuses a batch from a newer pipe, stores the batch as one row, and stores it once however often it arrives |
 | `GET /health` | `{ ok: true }`. With `?deep=1` and the key: live batches, the newest one's age and place version |
 | `GET /retention`, `GET /anomalies` | The nightly job and the hourly scan, by hand, with the key |
 | `POST /notify` | `{ "text": "..." }` with the key: a line from the game's own tools (a publish) |
