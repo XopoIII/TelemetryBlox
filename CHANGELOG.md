@@ -9,6 +9,10 @@ by the same tag.
 ### Changed
 
 The pipe:
+- The flusher's first wake is staggered within one tick by the hash of the server's job id. A
+  publish or a surge starts many servers in the same second, and a fleet whose flushers wake
+  together would post together for its whole life; now it spreads its posts across the tick and
+  keeps them spread.
 - The ring no longer shifts its array when a full tier drops its oldest row: a tier is an array and
   a head, eviction is a step of the head, and the spent rows are moved over once they outnumber the
   waiting ones. An emit into a full ring under a flood now costs what an emit into an empty one

@@ -90,9 +90,21 @@ const MUTANTS: { Mutant.Mutant } = {
 	},
 	{
 		file = "src/Pipe.luau",
-		from = "services.wait(config.tickSeconds)",
-		to = "services.wait(config.flushSeconds)",
+		from = "\t\t\twake = config.tickSeconds\n",
+		to = "\t\t\twake = config.flushSeconds\n",
 		breaks = "the flusher wakes every tick",
+	},
+	{
+		file = "src/Pipe.luau",
+		from = "local wake = Pipe.stagger(services.server().jobId, config.tickSeconds)",
+		to = "local wake = config.tickSeconds",
+		breaks = "the first wake is staggered by the job id",
+	},
+	{
+		file = "src/Pipe.luau",
+		from = "Hash.str32(jobId) % math.max(1, math.floor(tickSeconds))",
+		to = "Hash.str32(jobId) % (math.max(1, math.floor(tickSeconds)) + 1)",
+		breaks = "the stagger is shorter than a tick",
 	},
 	{
 		file = "src/Pipe.luau",

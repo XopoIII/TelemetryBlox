@@ -121,6 +121,7 @@ that each does.
 | A loss | written into the stream as one row of `dropEvent`: `count`, and its parts `overflow` (a full ring), `send_failed` (the ingest never took the batch), `refused` (a call of no use) |
 | Shutdown | the drain posts what waits, waits for the leaving players' last rows, and ends once the server has been empty and silent for 2 s (`closeQuiet`) or 20 s have passed (`closeBudget`) |
 | Studio | never sends. The ring still fills, so `recent()` reads back |
+| The first wake | staggered within one tick by the hash of the server's job id, so a fleet that started together does not post together |
 
 ### The API
 
