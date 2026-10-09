@@ -24,6 +24,18 @@ const MUTANTS: { Mutant.Mutant } = {
 	},
 	{
 		file = "src/Ring.luau",
+		from = "\t\t\ttier.head += 1\n\t\t\tevicted += 1\n",
+		to = "\t\t\tprotected.head += 1\n\t\t\tevicted += 1\n",
+		breaks = "a full bulk ring evicts a bulk row, never a protected one",
+	},
+	{
+		file = "src/Ring.luau",
+		from = "\t\t\ttier.head += 1\n\t\t\tevicted += 1\n",
+		to = "\t\t\tbulk.head += 1\n\t\t\tevicted += 1\n",
+		breaks = "a full protected ring evicts its own oldest, never a bulk row",
+	},
+	{
+		file = "src/Ring.luau",
 		from = "\t\t\tevicted += 1\n",
 		to = "",
 		breaks = "an evicted row is counted",

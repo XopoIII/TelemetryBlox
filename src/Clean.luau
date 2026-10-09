@@ -11,6 +11,12 @@
 --- and its string keys, both when it has both. Everything else is dropped from its row, silently:
 --- the row itself still lands.
 ---
+--- A MIXED TABLE IS WHOLE HERE, NOT ON THE WIRE. JSON has no value that is both an array and an
+--- object, so what a table with both halves becomes is the encoder's choice: LuneBlox's writes the
+--- array alone, and Roblox's `JSONEncode` is documented to do the same. The copy keeps both so that
+--- `recent()` and a listener see what the game wrote; a game that wants a field stored gives it a
+--- table of its own.
+---
 --- THE LIMITS ARE THE GAME'S TO SET (`Options.maxStringBytes`, `Options.maxDepth`): a game whose rows
 --- carry long text (a whole error message, a chat line) raises the first, and pays for it in the size
 --- of its posts.
@@ -78,7 +84,7 @@ function copy(source: { [any]: any }, depth: number, limits: Limits): { [any]: a
 		const value = kept(source[index], depth, limits)
 		out[index] = if value == nil then false else value
 	end
-	-- The string keys, in a table that has an array part too: dropping them would hide half a row.
+	-- The string keys, in a table that has an array part too: the copy holds what the game wrote.
 	for key, value in source do
 		if type(key) == "string" then
 			out[key] = kept(value, depth, limits)

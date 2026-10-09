@@ -71,6 +71,40 @@ Spec.test("urgent and protected rows survive a flood of bulk rows, which evicts 
 	Spec.equal(batch[1].ctx.robux, 25, "the purchase is whole")
 end)
 
+Spec.test("a protected ring exactly full loses nothing to a bulk flood, and each tier loses only its own", function()
+	const r = ring(4, 3)
+	r.emit("purchase", "u_a", { robux = 25 })
+	r.emit("session", "u_a", {})
+	r.emit("purchase", "u_b", { robux = 99 })
+	Spec.equal(r.dropped(), 0, "the protected ring is exactly full")
+	-- Fifty bulk rows into a ring of four: far enough for its housekeeping to run more than once.
+	for _ = 1, 50 do
+		r.emit("feed", nil, {})
+	end
+	Spec.equal(r.size(), 7, "four bulk rows and the three kept apart")
+	Spec.equal(
+		names(r.recent()),
+		"purchase#1 session#2 purchase#3 feed#50 feed#51 feed#52 feed#53",
+		"every protected row, and the newest four of the flood"
+	)
+	const evicted, unsent, refused = r.claimDropped()
+	Spec.equal({ evicted, unsent, refused }, { 46, 0, 0 }, "forty-six bulk rows, and nothing else")
+	Spec.equal(r.urgent(), true, "the purchases still ask for an early post")
+
+	-- One protected row more than its ring holds: its own oldest goes, and no bulk row with it.
+	r.emit("session", "u_b", {})
+	const again = r.claimDropped()
+	Spec.equal(again, 1, "one row, the protected ring's own")
+	const batch = r.take(10)
+	Spec.equal(
+		names(batch),
+		"session#2 purchase#3 session#54 feed#50 feed#51 feed#52 feed#53",
+		"the protected rows first and whole, then the bulk rows untouched"
+	)
+	Spec.equal(batch[2].ctx.robux, 99, "the purchase that stayed is whole")
+	Spec.equal(batch[2].actor, "u_b", "and its own")
+end)
+
 Spec.test("the protected ring is bounded too, by its own size", function()
 	const r = ring(5, 2)
 	r.emit("purchase", nil, {})

@@ -4,56 +4,108 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
-## Unreleased
+## 0.4.0 - 2026-10-09
 
-### Added
+The wire is as it was: `schemaVersion` is 1 on both sides, the envelope and the tables are
+unchanged, and no migration is added. A 0.3.0 pipe posts to a 0.4.0 Worker and a 0.4.0 pipe to a
+0.3.0 Worker, so the two halves can be updated in either order.
 
-The repository:
-- A smoke gate (`worker/smoke/`): the committed `worker/dist` served by workerd itself — the
-  runtime Cloudflare runs — with its D1 binding over real SQLite and the kit's migrations applied.
-  A batch goes in through the front door, a duplicate is held off, and the health door answers from
-  the data. The unit tests prove the parts; the smoke proves the whole still runs as a Worker. It
-  is part of `check-worker.sh`, so hooks and CI both run it. `miniflare` joins the dev dependencies
-  for it, pinned exactly like the rest.
-The Worker:
-- `alertStateDays` (7): how many days an alert's cool-down state is kept after it last went. A key
-  quiet for longer starts over, and its row is dropped with the night. What was a fixed week is now
-  the game's to set.
-### Fixed
-
-The pipe:
-- A Studio server no longer sends an empty job id. The ingest names a batch by (job id, server
-  start, first row), and two Studio servers started in the same second shared that identity: the
-  second one's rows were ignored as a copy of the first's. The engine adapter now gives a Studio
-  server a made-up id of its own (`studio-<guid>`), one per server.
 ### Added
 
 The Worker:
 - The ingest refuses a batch whose `schemaVersion` is newer than it reads, with a 400 that says so,
   instead of storing it half-understood. An older pipe keeps working against an updated Worker.
+  `SCHEMA_VERSION` is exported.
 - `maxBatchesPerMinute` (1,200) and `maxServerBatchesPerMinute` (60): a bound on how fast batches
-  may arrive, over every server and from one, by job id. The surplus is refused with a 429, which
-  the pipe holds and posts again. The counts live in the Worker's memory, so the bound costs no
-  written rows and is per isolate, best-effort. `SCHEMA_VERSION` is exported.
+  may arrive, over every server and from one, by job id. The surplus is refused with a 429. The
+  counts live in the Worker's memory, so the bound costs no written rows and is per isolate,
+  best-effort.
+- `alertStateDays` (7): how many days an alert's cool-down state is kept after it last went. A key
+  quiet for longer starts over, and its row is dropped with the night. What was a fixed week is now
+  the game's to set.
+
+The repository:
+- A smoke gate (`worker/smoke/`): the committed `worker/dist` served by workerd itself, the
+  runtime Cloudflare runs, with its D1 binding over real SQLite and the kit's migrations applied.
+  A batch goes in through the front door, a duplicate is held off, and the health door answers from
+  the data. It is part of `check-worker.sh`, so hooks and CI both run it. `miniflare` joins the dev
+  dependencies for it; a game installs none of them.
+- A release workflow: a pushed tag runs every gate, checks that the tag names the version,
+  publishes the pesde package and makes the GitHub release from this file. It needs the repository
+  secret `PESDE_TOKEN`.
+- Secret scanning (gitleaks) in CI, and Dependabot for the Node tools and the CI actions.
+- `scripts/check-lockfile.sh`: every package in `package-lock.json` is fetched from the public npm
+  registry. It runs in pre-commit and at the head of `check-worker.sh`.
+
 ### Changed
 
 The pipe:
+- A batch the ingest answers with a 429 is held without spending one of its tries, for at most ten
+  posts of one batch; past that a 429 costs a try like any other answer. Any other refusal costs a
+  try as before, and a batch is still counted lost after `maxTries` of them. No request is added: a
+  held batch is posted once a wake, as it was, and the drain still ends at its budget. The retry is
+  logged under the same id, `telemetry.send_retry`, whose `try` is the tries spent: 0 for a batch
+  that has only waited.
 - The flusher's first wake is staggered within one tick by the hash of the server's job id. A
   publish or a surge starts many servers in the same second, and a fleet whose flushers wake
   together would post together for its whole life; now it spreads its posts across the tick and
-  keeps them spread.
+  keeps them spread. The first wake comes sooner than a tick, never later, so an urgent row waits
+  no longer than it did. A server's first regular post is that much later: up to
+  `flushSeconds + tickSeconds - 1` seconds after the start in place of `flushSeconds`.
 - The ring no longer shifts its array when a full tier drops its oldest row: a tier is an array and
   a head, eviction is a step of the head, and the spent rows are moved over once they outnumber the
   waiting ones. An emit into a full ring under a flood now costs what an emit into an empty one
-  costs.
-- A context table with an array part now keeps its string keys too: a mixed table was kept as its
-  array alone, and half a row could vanish without a trace.
-- Option checks at boot are stricter, so a mistake is an error at boot and not a silence later:
-  `endpoint` must be an `https://` URL or empty (every post carries the ingest key in a header);
-  `maxBatch`, `ringSize`, `protectedSize`, `maxTries`, `maxStringBytes` and `maxDepth` must be whole
-  numbers; `tickSeconds` must not exceed `flushSeconds`.
+  costs. What a tier holds, what it drops and what it counts are unchanged; a full tier keeps up to
+  as many spent rows again until the move.
+- A context table with an array part keeps its string keys too, in the row's copy: `recent()` and
+  a listener now read both halves, where they read the array alone. **This is not a change on the
+  wire.** JSON has no value that is both, and the encoder decides: on LuneBlox, where the specs
+  run, a mixed table still leaves as its array alone, and Roblox's `HttpService:JSONEncode` is
+  documented to do the same. A named field that must be stored goes in a table of its own.
+- Option checks at boot are stricter. Each of these was accepted by 0.3.0 and is an error at boot
+  now:
+  - an `endpoint` that is not empty and does not start with `https://` (every post carries the
+    ingest key in a header);
+  - a `maxBatch`, `ringSize`, `protectedSize`, `maxTries`, `maxStringBytes` or `maxDepth` that is
+    not a whole number;
+  - a `tickSeconds` greater than `flushSeconds`.
 
-Nothing changes for a game whose options were already valid.
+  A game that sets none of these, or sets them to whole numbers, an https endpoint and a tick no
+  longer than its flush, starts as it did. Any other game must correct its options before it
+  updates.
+
+### Fixed
+
+The pipe:
+- A Studio server no longer has an empty job id. The ingest names a batch by (job id, server
+  start, first row), and two Studio servers started in the same second would share that identity.
+  The engine adapter now gives a Studio server a made-up id of its own (`studio-<guid>`), one per
+  server. Studio still never sends; the id is what a batch would carry, and what the stagger reads.
+
+The Worker:
+- The limiter's words said that a 429 costs a delay and that nothing in the pipe posts faster than
+  the drain's retry. Neither was true of the pipe as it was: a 429 cost a try, and a drain posts
+  its backlog back to back. The pipe now does the first (above), and the comments and the README
+  say what the second really is.
+
+The repository:
+- CI on `main` was red from the smoke gate's merge: its lockfile resolved 56 of 87 packages from
+  a private mirror, so `npm ci` failed and the Worker's gate never ran. The lock names the public
+  registry only; `overrides` lift sharp and undici, which miniflare pins, past three high
+  advisories (`npm audit` reports none); `allowScripts` names workerd's postinstall.
+
+### Not done
+
+- **Roblox's encoder has not been run on a mixed table.** `HttpService:JSONEncode({ ctx = { 1, 2,
+  a = 3 } })` in Studio is the probe. The documentation says the array part alone is written, which
+  is what 0.3.0 kept; if the engine does otherwise, that is what a game with such a context will
+  see.
+- The limiter has not run on Cloudflare: its tests run in Node and the smoke in local workerd,
+  with one isolate. How many isolates share a game's traffic, and so how loose the bound is, is
+  not measured.
+- The stagger, the Studio job id and the 429 rule have not run in a Roblox server: the engine
+  adapter is type-checked, not run.
+- The release workflow has not run: this is the first tag since it was added.
 
 ## 0.3.0 - 2026-10-08
 
