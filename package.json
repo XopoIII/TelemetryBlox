@@ -1,6 +1,6 @@
 {
 	"name": "telemetryblox",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"description": "The Worker half of TelemetryBlox: the ingest for a Roblox game's telemetry batches and the Telegram sender of its alerts, deployed by each game as a project of its own",
 	"private": true,
 	"license": "MIT",
