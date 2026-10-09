@@ -8,6 +8,13 @@ by the same tag.
 
 ### Added
 
+The repository:
+- A smoke gate (`worker/smoke/`): the committed `worker/dist` served by workerd itself — the
+  runtime Cloudflare runs — with its D1 binding over real SQLite and the kit's migrations applied.
+  A batch goes in through the front door, a duplicate is held off, and the health door answers from
+  the data. The unit tests prove the parts; the smoke proves the whole still runs as a Worker. It
+  is part of `check-worker.sh`, so hooks and CI both run it. `miniflare` joins the dev dependencies
+  for it, pinned exactly like the rest.
 The Worker:
 - `alertStateDays` (7): how many days an alert's cool-down state is kept after it last went. A key
   quiet for longer starts over, and its row is dropped with the night. What was a fixed week is now
