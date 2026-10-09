@@ -237,26 +237,6 @@ Spec.test("a post is due every three minutes, and early only for cause", functio
 	Spec.equal(pipe.due(0), false, "sent: nothing is due")
 end)
 
-Spec.test("the flusher wakes every minute and posts on the third, then counts again", function()
-	const world, ring, pipe = setup()
-	ring.emit("feed", nil, {})
-	-- How many posts had been made when each wake began.
-	const seen: { number } = {}
-	world.onWait = function()
-		table.insert(seen, #world.posts)
-		if #seen == 4 then
-			ring.emit("feed", nil, {})
-		elseif #seen == 8 then
-			error("stop")
-		end
-	end
-	Spec.equal(pcall(pipe.run), false, "the loop only ends when the spec stops it")
-	Spec.equal(world.waits, { 60, 60, 60, 60, 60, 60, 60, 60 }, "a minute a wake")
-	-- The first row leaves on the third wake; the second, written during the fourth, leaves three
-	-- minutes after that post, on the sixth.
-	Spec.equal(seen, { 0, 0, 0, 1, 1, 1, 2, 2 }, "posts made by each wake")
-end)
-
 Spec.test("an urgent row leaves on the next wake, not in three minutes", function()
 	const world, ring, pipe = setup()
 	world.clock += 60

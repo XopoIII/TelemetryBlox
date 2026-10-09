@@ -6,6 +6,14 @@ by the same tag.
 
 ## Unreleased
 
+### Changed
+
+The pipe:
+- The flusher's first wake is staggered within one tick by the hash of the server's job id. A
+  publish or a surge starts many servers in the same second, and a fleet whose flushers wake
+  together would post together for its whole life; now it spreads its posts across the tick and
+  keeps them spread.
+
 ## 0.3.0 - 2026-10-08
 
 ### Added
