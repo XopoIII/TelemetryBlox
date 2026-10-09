@@ -6,6 +6,18 @@ by the same tag.
 
 ## Unreleased
 
+### Changed
+
+The pipe:
+- A context table with an array part now keeps its string keys too: a mixed table was kept as its
+  array alone, and half a row could vanish without a trace.
+- Option checks at boot are stricter, so a mistake is an error at boot and not a silence later:
+  `endpoint` must be an `https://` URL or empty (every post carries the ingest key in a header);
+  `maxBatch`, `ringSize`, `protectedSize`, `maxTries`, `maxStringBytes` and `maxDepth` must be whole
+  numbers; `tickSeconds` must not exceed `flushSeconds`.
+
+Nothing changes for a game whose options were already valid.
+
 ## 0.3.0 - 2026-10-08
 
 ### Added

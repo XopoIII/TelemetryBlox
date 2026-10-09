@@ -108,9 +108,15 @@ const MUTANTS: { Mutant.Mutant } = {
 	},
 	{
 		file = "src/Clean.luau",
-		from = "if length > 0 then",
-		to = "if length > 1 then",
+		from = "for index = 1, length do",
+		to = "for index = 2, length do",
 		breaks = "an array of one is an array",
+	},
+	{
+		file = "src/Clean.luau",
+		from = '\tfor key, value in source do\n\t\tif type(key) == "string" then\n\t\t\tout[key] = kept(value, depth, limits)\n\t\tend\n\tend\n',
+		to = "",
+		breaks = "a table with an array part keeps its string keys too",
 	},
 	{
 		file = "src/Clean.luau",
