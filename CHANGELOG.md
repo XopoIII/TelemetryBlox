@@ -4,6 +4,21 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## Unreleased
+
+### Fixed
+
+- The release workflow no longer reports a release when the registry refused the package.
+  `pesde publish` exits 0 on a refusal, so the first tagged run (0.4.0) printed a 401, made
+  the GitHub release and went green with nothing on the registry; 0.4.0 was then published by
+  hand. The step now fails unless pesde says it published that version, and fails at once
+  when the secret `PESDE_TOKEN` is empty.
+
+### Changed
+
+- The lockfile gate runs as its own step before the install in both workflows, so a lock that
+  names a private mirror says so instead of failing `npm ci` with a network error.
+
 ## 0.4.0 - 2026-10-09
 
 The wire is as it was: `schemaVersion` is 1 on both sides, the envelope and the tables are
