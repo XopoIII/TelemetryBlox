@@ -119,6 +119,11 @@ export interface WorkerConfig {
     digest?: DigestConfig | false;
     /** Days raw batches are kept. 60 by default. */
     retentionDays?: number;
+    /**
+     * Days an alert's cool-down state is kept after it last went. 7 by default: a key quiet for
+     * that long starts over, and its row is dropped with the night.
+     */
+    alertStateDays?: number;
     /** Raw events kept whatever their age. 2,000,000 by default, about 300 MB. */
     maxRawEvents?: number;
     /** The UTC hour whose run is also the nightly one. 3 by default. */
@@ -129,6 +134,17 @@ export interface WorkerConfig {
     maxBodyBytes?: number;
     /** Events a batch may hold. 2000 by default. */
     maxEvents?: number;
+    /**
+     * Batches the ingest takes a minute, over every server. 1,200 by default. A compromised key or a
+     * game stuck in a posting loop would otherwise spend the day's written rows in minutes; the
+     * surplus is refused with a 429, which the pipe holds and posts again.
+     */
+    maxBatchesPerMinute?: number;
+    /**
+     * Batches the ingest takes from one server a minute. 60 by default: the shutdown drain retries
+     * every two seconds, and nothing in the pipe posts faster. Counted by the batch's job id.
+     */
+    maxServerBatchesPerMinute?: number;
     marks?: Partial<Marks>;
     /**
      * What starts the message of a Roblox webhook, by its kind, in place of `marks.roblox` and the
@@ -167,11 +183,14 @@ export interface Resolved {
         text?: (day: DigestDay) => string;
     } | null;
     retentionDays: number;
+    alertStateDays: number;
     maxRawEvents: number;
     nightlyHourUtc: number;
     environments: string[];
     maxBodyBytes: number;
     maxEvents: number;
+    maxBatchesPerMinute: number;
+    maxServerBatchesPerMinute: number;
     marks: Marks;
     robloxPrefix: (kind: RobloxKind) => string;
     channels: Map<string, ChannelNames>;
@@ -183,11 +202,14 @@ export declare const DEFAULTS: {
     cooldownSeconds: Record<Severity, number>;
     maxAlertsPerBatch: number;
     retentionDays: number;
+    alertStateDays: number;
     maxRawEvents: number;
     nightlyHourUtc: number;
     environments: string[];
     maxBodyBytes: number;
     maxEvents: number;
+    maxBatchesPerMinute: number;
+    maxServerBatchesPerMinute: number;
     marks: Marks;
     bindings: BindingNames;
 };

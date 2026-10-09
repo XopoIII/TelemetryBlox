@@ -7,8 +7,10 @@ import {
 	batch,
 	CONFIG,
 	call,
+	DAY,
 	environment,
 	kit,
+	NOW,
 	recordTelegram,
 	rows,
 	TOKEN,
@@ -226,6 +228,24 @@ test("an hourly run scans and nothing else; the nightly run also rolls up, prune
 	]);
 	// A cool-down row not touched for a week is dropped with the night.
 	assert.equal(rows(env, "SELECT COUNT(*) AS n FROM alert_state")[0].n, 0);
+});
+
+test("a game says how many days a cool-down's state is kept", async () => {
+	const keeper = createWorker({ game: "example", alertStateDays: 30 });
+	const env = environment();
+	env.DB.raw.exec(
+		`INSERT INTO alert_state (key, sent_at, held, released) VALUES
+		 ('eight-days', ${NOW - 8 * DAY}, 0, 0),
+		 ('forty-days', ${NOW - 40 * DAY}, 0, 0)`,
+	);
+	const waited = [];
+	await keeper.scheduled({ scheduledTime: Date.UTC(2026, 9, 4, 3, 17) }, env, {
+		waitUntil: (p) => waited.push(p),
+	});
+	await Promise.all(waited);
+	// Eight days quiet: past the week's default, inside the game's thirty, so kept. Forty is gone
+	// under both.
+	assert.deepEqual(rows(env, "SELECT key FROM alert_state"), [{ key: "eight-days" }]);
 });
 
 test("a cron run that fails is logged and breaks nothing", async () => {

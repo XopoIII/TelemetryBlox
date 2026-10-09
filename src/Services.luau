@@ -12,7 +12,9 @@ export type Response = {
 	StatusCode: number,
 }
 
---> Which server this is. `jobId` is empty in Studio.
+--> Which server this is. `jobId` is empty in Studio only in a spec's fake: the real adapter
+--> (`RobloxServices`) names a Studio server with a made-up id, so two of them cannot share a
+--> batch's identity at the ingest.
 export type Server = {
 	universeId: string,
 	placeId: string,

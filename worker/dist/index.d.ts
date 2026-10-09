@@ -27,6 +27,7 @@ import { type Env, type Resolved, type SeenEvent, type WorkerConfig } from "./co
 export type { Alert, BatchMeta } from "./alerts.js";
 export type { AlertRule, BindingNames, ChannelNames, DigestConfig, DigestDay, Env, Marks, Resolved, RobloxKind, ScanRule, SeenEvent, Severity, WorkerConfig, } from "./config.js";
 export { DEFAULTS, field, MAX_SCAN_RULES, short, who } from "./config.js";
+export { SCHEMA_VERSION } from "./ingest.js";
 export { robloxAlertText, robloxKind } from "./roblox.js";
 /** The Worker's parts over one game's config, for a game's own tests and tools. */
 export interface Kit {

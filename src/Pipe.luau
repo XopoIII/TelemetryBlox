@@ -16,7 +16,13 @@
 --- rows' own numbers), so a post that landed without its answer is ignored by the ingest rather than
 --- stored twice. After `maxTries` posts the batch is counted lost.
 ---
+--- THE FIRST WAKE IS STAGGERED. A publish or a surge starts many servers in the same second, and a
+--- fleet whose flushers wake together posts together for its whole life. The first wait is the job
+--- id's hash within the tick (`stagger`), so the fleet spreads its posts across the minute and keeps
+--- them spread.
+---
 --- An empty destination is COLLECT-ONLY: the ring still fills and reads back, and nothing is sent.
+const Hash = require("./Hash")
 const Ring = require("./Ring")
 const Services = require("./Services")
 
@@ -28,6 +34,12 @@ Pipe.SCHEMA_VERSION = 1
 Pipe.CLOSE_RETRY_SECONDS = 2
 --> Seconds between looks at an empty ring while draining.
 Pipe.CLOSE_POLL_SECONDS = 0.25
+
+--> Seconds before the flusher's first wake: the job id's hash within the tick, so servers that
+--> started together do not post together. Deterministic: the same server wakes at the same offset.
+function Pipe.stagger(jobId: string, tickSeconds: number): number
+	return Hash.str32(jobId) % math.max(1, math.floor(tickSeconds))
+end
 
 export type Config = {
 	--> The ingest's URL. Empty: collect, and send nothing.
@@ -185,8 +197,11 @@ function Pipe.new(config: Config, ring: Ring.Ring, services: Services.Services):
 
 	function self.run()
 		posted = services.clock()
+		-- The first wake is the stagger; every one after is a tick.
+		local wake = Pipe.stagger(services.server().jobId, config.tickSeconds)
 		while true do
-			services.wait(config.tickSeconds)
+			services.wait(wake)
+			wake = config.tickSeconds
 			self.tick()
 		end
 	end

@@ -149,7 +149,10 @@ export async function deliver(config, env, alerts, now = Math.floor(Date.now() /
     }
     return sent;
 }
-/** Old cool-down rows, dropped nightly: a key not sent for a week starts over. */
+/** Old cool-down rows, dropped nightly: a key not sent for `alertStateDays` starts over. */
 export async function pruneAlertState(config, env) {
-    await database(env, config).prepare(`DELETE FROM alert_state WHERE sent_at < unixepoch('now', '-7 days')`).run();
+    await database(env, config)
+        .prepare(`DELETE FROM alert_state WHERE sent_at < unixepoch('now', ?1)`)
+        .bind(`-${config.alertStateDays} days`)
+        .run();
 }

@@ -54,10 +54,15 @@ end)
 Spec.test("an array is kept as an array, and a dropped element keeps its place as false", function()
 	Spec.equal(Clean.context({ list = { 1, "two", true } }), { list = { 1, "two", true } }, "array")
 	Spec.equal(Clean.context({ list = { 1, 0 / 0, 3 } }), { list = { 1, false, 3 } }, "a hole would end the array")
-	-- A table with an array part keeps only that part.
+	-- A table with an array part keeps both: the array, and its named fields beside it.
 	const mixed: { [any]: any } = { 10, 20 }
 	mixed.name = "x"
-	Spec.equal(Clean.context({ mixed = mixed }), { mixed = { 10, 20 } }, "mixed")
+	const both: { [any]: any } = { 10, 20 }
+	both.name = "x"
+	Spec.equal(Clean.context({ mixed = mixed }), { mixed = both }, "mixed")
+	-- ...and a dropped value in either half is still dropped.
+	mixed.extra = 0 / 0
+	Spec.equal(Clean.context({ mixed = mixed }), { mixed = both }, "a NaN is out of both halves")
 end)
 
 Spec.test("the row's copy is its own: the caller's table is not kept and not changed", function()

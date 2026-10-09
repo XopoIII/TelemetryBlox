@@ -15,6 +15,45 @@ The repository:
   the data. The unit tests prove the parts; the smoke proves the whole still runs as a Worker. It
   is part of `check-worker.sh`, so hooks and CI both run it. `miniflare` joins the dev dependencies
   for it, pinned exactly like the rest.
+The Worker:
+- `alertStateDays` (7): how many days an alert's cool-down state is kept after it last went. A key
+  quiet for longer starts over, and its row is dropped with the night. What was a fixed week is now
+  the game's to set.
+### Fixed
+
+The pipe:
+- A Studio server no longer sends an empty job id. The ingest names a batch by (job id, server
+  start, first row), and two Studio servers started in the same second shared that identity: the
+  second one's rows were ignored as a copy of the first's. The engine adapter now gives a Studio
+  server a made-up id of its own (`studio-<guid>`), one per server.
+### Added
+
+The Worker:
+- The ingest refuses a batch whose `schemaVersion` is newer than it reads, with a 400 that says so,
+  instead of storing it half-understood. An older pipe keeps working against an updated Worker.
+- `maxBatchesPerMinute` (1,200) and `maxServerBatchesPerMinute` (60): a bound on how fast batches
+  may arrive, over every server and from one, by job id. The surplus is refused with a 429, which
+  the pipe holds and posts again. The counts live in the Worker's memory, so the bound costs no
+  written rows and is per isolate, best-effort. `SCHEMA_VERSION` is exported.
+### Changed
+
+The pipe:
+- The flusher's first wake is staggered within one tick by the hash of the server's job id. A
+  publish or a surge starts many servers in the same second, and a fleet whose flushers wake
+  together would post together for its whole life; now it spreads its posts across the tick and
+  keeps them spread.
+- The ring no longer shifts its array when a full tier drops its oldest row: a tier is an array and
+  a head, eviction is a step of the head, and the spent rows are moved over once they outnumber the
+  waiting ones. An emit into a full ring under a flood now costs what an emit into an empty one
+  costs.
+- A context table with an array part now keeps its string keys too: a mixed table was kept as its
+  array alone, and half a row could vanish without a trace.
+- Option checks at boot are stricter, so a mistake is an error at boot and not a silence later:
+  `endpoint` must be an `https://` URL or empty (every post carries the ingest key in a header);
+  `maxBatch`, `ringSize`, `protectedSize`, `maxTries`, `maxStringBytes` and `maxDepth` must be whole
+  numbers; `tickSeconds` must not exceed `flushSeconds`.
+
+Nothing changes for a game whose options were already valid.
 
 ## 0.3.0 - 2026-10-08
 

@@ -130,6 +130,11 @@ export interface WorkerConfig {
 	digest?: DigestConfig | false;
 	/** Days raw batches are kept. 60 by default. */
 	retentionDays?: number;
+	/**
+	 * Days an alert's cool-down state is kept after it last went. 7 by default: a key quiet for
+	 * that long starts over, and its row is dropped with the night.
+	 */
+	alertStateDays?: number;
 	/** Raw events kept whatever their age. 2,000,000 by default, about 300 MB. */
 	maxRawEvents?: number;
 	/** The UTC hour whose run is also the nightly one. 3 by default. */
@@ -140,6 +145,17 @@ export interface WorkerConfig {
 	maxBodyBytes?: number;
 	/** Events a batch may hold. 2000 by default. */
 	maxEvents?: number;
+	/**
+	 * Batches the ingest takes a minute, over every server. 1,200 by default. A compromised key or a
+	 * game stuck in a posting loop would otherwise spend the day's written rows in minutes; the
+	 * surplus is refused with a 429, which the pipe holds and posts again.
+	 */
+	maxBatchesPerMinute?: number;
+	/**
+	 * Batches the ingest takes from one server a minute. 60 by default: the shutdown drain retries
+	 * every two seconds, and nothing in the pipe posts faster. Counted by the batch's job id.
+	 */
+	maxServerBatchesPerMinute?: number;
 	marks?: Partial<Marks>;
 	/**
 	 * What starts the message of a Roblox webhook, by its kind, in place of `marks.roblox` and the
@@ -177,11 +193,14 @@ export interface Resolved {
 	scan: ScanRule[];
 	digest: { events: string[]; text?: (day: DigestDay) => string } | null;
 	retentionDays: number;
+	alertStateDays: number;
 	maxRawEvents: number;
 	nightlyHourUtc: number;
 	environments: string[];
 	maxBodyBytes: number;
 	maxEvents: number;
+	maxBatchesPerMinute: number;
+	maxServerBatchesPerMinute: number;
 	marks: Marks;
 	robloxPrefix: (kind: RobloxKind) => string;
 	channels: Map<string, ChannelNames>;
@@ -194,11 +213,14 @@ export const DEFAULTS = {
 	cooldownSeconds: { critical: 600, warning: 1800, info: 0 } as Record<Severity, number>,
 	maxAlertsPerBatch: 8,
 	retentionDays: 60,
+	alertStateDays: 7,
 	maxRawEvents: 2_000_000,
 	nightlyHourUtc: 3,
 	environments: ["live", "studio", "test"],
 	maxBodyBytes: 1_000_000,
 	maxEvents: 2000,
+	maxBatchesPerMinute: 1200,
+	maxServerBatchesPerMinute: 60,
 	marks: {
 		critical: "[critical]",
 		warning: "[warning]",
@@ -348,11 +370,18 @@ export function resolve(config: WorkerConfig): Resolved {
 				? null
 				: { events: config.digest?.events ?? [...rules.keys()], text: config.digest?.text },
 		retentionDays: positive(config.retentionDays, DEFAULTS.retentionDays, "retentionDays"),
+		alertStateDays: positive(config.alertStateDays, DEFAULTS.alertStateDays, "alertStateDays"),
 		maxRawEvents: positive(config.maxRawEvents, DEFAULTS.maxRawEvents, "maxRawEvents"),
 		nightlyHourUtc: nightly,
 		environments,
 		maxBodyBytes: positive(config.maxBodyBytes, DEFAULTS.maxBodyBytes, "maxBodyBytes"),
 		maxEvents: positive(config.maxEvents, DEFAULTS.maxEvents, "maxEvents"),
+		maxBatchesPerMinute: positive(config.maxBatchesPerMinute, DEFAULTS.maxBatchesPerMinute, "maxBatchesPerMinute"),
+		maxServerBatchesPerMinute: positive(
+			config.maxServerBatchesPerMinute,
+			DEFAULTS.maxServerBatchesPerMinute,
+			"maxServerBatchesPerMinute",
+		),
 		marks,
 		robloxPrefix: config.robloxPrefix ?? (() => `${marks.roblox} ${config.game}:`),
 		channels,

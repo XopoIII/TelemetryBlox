@@ -7,8 +7,9 @@
 --- every such value left out, and the caller's own table is never touched or kept.
 ---
 --- Kept: strings (cut at `maxString` bytes), finite numbers, booleans, and tables of these down to
---- `maxDepth` levels. A table with an array part is kept as that array; any other table keeps its
---- string keys. Everything else is dropped from its row, silently: the row itself still lands.
+--- `maxDepth` levels. A table keeps its array part (a dropped element's place is held by `false`)
+--- and its string keys, both when it has both. Everything else is dropped from its row, silently:
+--- the row itself still lands.
 ---
 --- THE LIMITS ARE THE GAME'S TO SET (`Options.maxStringBytes`, `Options.maxDepth`): a game whose rows
 --- carry long text (a whole error message, a chat line) raises the first, and pays for it in the size
@@ -71,15 +72,13 @@ end
 function copy(source: { [any]: any }, depth: number, limits: Limits): { [any]: any }
 	const out: { [any]: any } = {}
 	const length = #source
-	if length > 0 then
-		-- An array: a dropped element would leave a hole, and a hole ends the array for the encoder,
-		-- so its place is kept by `false`.
-		for index = 1, length do
-			const value = kept(source[index], depth, limits)
-			out[index] = if value == nil then false else value
-		end
-		return out
+	-- The array part: a dropped element would leave a hole, and a hole ends the array for the
+	-- encoder, so its place is kept by `false`.
+	for index = 1, length do
+		const value = kept(source[index], depth, limits)
+		out[index] = if value == nil then false else value
 	end
+	-- The string keys, in a table that has an array part too: dropping them would hide half a row.
 	for key, value in source do
 		if type(key) == "string" then
 			out[key] = kept(value, depth, limits)
