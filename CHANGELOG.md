@@ -6,6 +6,14 @@ by the same tag.
 
 ## Unreleased
 
+### Changed
+
+The pipe:
+- The ring no longer shifts its array when a full tier drops its oldest row: a tier is an array and
+  a head, eviction is a step of the head, and the spent rows are moved over once they outnumber the
+  waiting ones. An emit into a full ring under a flood now costs what an emit into an empty one
+  costs.
+
 ## 0.3.0 - 2026-10-08
 
 ### Added
