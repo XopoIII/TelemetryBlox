@@ -24,6 +24,10 @@ pre-commit:
       run: sh scripts/check-file-size.sh {staged_files}
     english-only:
       run: sh scripts/check-english.sh {staged_files}
+    lockfile:
+      glob: "package-lock.json"
+      # Every archive from the public registry: a mirror's host in the lock breaks `npm ci` in CI.
+      run: sh scripts/check-lockfile.sh
     worker:
       glob: "{worker/**,package.json,package-lock.json,biome.json,scripts/check-worker.sh}"
       # Types, format, the tests, and worker/dist being what worker/src builds: a game runs dist.

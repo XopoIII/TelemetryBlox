@@ -78,6 +78,10 @@ This is the reason the repository exists, and the rule a change is checked again
   release at the time it is added or bumped (check with `gh release view -R owner/repo`, `npm view
   <package> version`). Never a prerelease, and never a pin copied from a sibling repo without
   checking. Luau tools are in `rokit.toml`; Node tools in `package.json` and `package-lock.json`.
+- **The lock names the public registry only.** `package-lock.json` is made with
+  `npm install --registry=https://registry.npmjs.org/`; `scripts/check-lockfile.sh` refuses any
+  other host. `overrides` in `package.json` lift a tool's own dependency past a known advisory
+  (`npm audit` reports nothing), and `allowScripts` names the one install script that may run.
 - **LuneBlox is ours** (XopoIII/LuneBlox). When TelemetryBlox needs something from it, the change is
   made there and flagged to the owner, not worked around here.
 
@@ -183,6 +187,7 @@ of this list.
 | `sh scripts/check-file-size.sh` | 300-line gate |
 | `sh scripts/check-english.sh` | English-only gate |
 | `sh scripts/check-package.sh` | The pesde archive carries all of `src/` (`pesde publish --dry-run`) |
+| `sh scripts/check-lockfile.sh` | Every package in `package-lock.json` is fetched from registry.npmjs.org |
 | `sh scripts/check-worker.sh` | The Worker: `tsc`, Biome, `worker/dist` against a fresh build, its tests, the example queries |
 | `npm run build` | Builds `worker/src` into `worker/dist` |
 | `npm test` | Builds, then runs the Worker's tests |
