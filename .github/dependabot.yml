@@ -1,0 +1,14 @@
+# The dependencies that age: the Worker's Node tools (package.json) and the actions the
+# workflows run. Once a week each; a bump is a pull request the gates then judge.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
