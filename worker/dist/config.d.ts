@@ -134,6 +134,17 @@ export interface WorkerConfig {
     maxBodyBytes?: number;
     /** Events a batch may hold. 2000 by default. */
     maxEvents?: number;
+    /**
+     * Batches the ingest takes a minute, over every server. 1,200 by default. A compromised key or a
+     * game stuck in a posting loop would otherwise spend the day's written rows in minutes; the
+     * surplus is refused with a 429, which the pipe holds and posts again.
+     */
+    maxBatchesPerMinute?: number;
+    /**
+     * Batches the ingest takes from one server a minute. 60 by default: the shutdown drain retries
+     * every two seconds, and nothing in the pipe posts faster. Counted by the batch's job id.
+     */
+    maxServerBatchesPerMinute?: number;
     marks?: Partial<Marks>;
     /**
      * What starts the message of a Roblox webhook, by its kind, in place of `marks.roblox` and the
@@ -178,6 +189,8 @@ export interface Resolved {
     environments: string[];
     maxBodyBytes: number;
     maxEvents: number;
+    maxBatchesPerMinute: number;
+    maxServerBatchesPerMinute: number;
     marks: Marks;
     robloxPrefix: (kind: RobloxKind) => string;
     channels: Map<string, ChannelNames>;
@@ -195,6 +208,8 @@ export declare const DEFAULTS: {
     environments: string[];
     maxBodyBytes: number;
     maxEvents: number;
+    maxBatchesPerMinute: number;
+    maxServerBatchesPerMinute: number;
     marks: Marks;
     bindings: BindingNames;
 };

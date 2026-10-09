@@ -140,6 +140,30 @@ Spec.test("recent is a copy, newest last, of as many rows as asked", function()
 	Spec.equal(r.size(), 3, "clearing the copy clears nothing")
 end)
 
+Spec.test("housekeeping never moves or loses a waiting row", function()
+	-- Fill past the compaction point, then read, round after round: a spent row the move left
+	-- behind, or a waiting row it ate, shows up in the very next take.
+	const r = ring(5, 2)
+	local emitted = 0
+	for round = 1, 10 do
+		for _ = 1, 23 do
+			emitted += 1
+			r.emit("feed", nil, {})
+		end
+		Spec.equal(r.size(), 5, `bounded, round {round}`)
+		const want = {}
+		for index = emitted - 4, emitted do
+			table.insert(want, `feed#{index}`)
+		end
+		Spec.equal(names(r.take(10)), table.concat(want, " "), `the newest five, round {round}`)
+	end
+	r.emit("session", nil, {})
+	emitted += 1
+	r.emit("feed", nil, {})
+	emitted += 1
+	Spec.equal(names(r.take(5)), `session#{emitted - 1} feed#{emitted}`, "protected first, after the housekeeping")
+end)
+
 Spec.test("the three losses are counted apart, and a claim zeroes them", function()
 	const r = ring(1, 1)
 	r.emit("feed", nil, {})

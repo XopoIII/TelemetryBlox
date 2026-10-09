@@ -24,11 +24,12 @@
  */
 import { alertsFor, deliver, pruneAlertState, send } from "./alerts.js";
 import { resolve, secret } from "./config.js";
-import { asText, authorised, ingest, json, secretsMatch } from "./ingest.js";
+import { asText, authorised, createLimiter, ingest, json, secretsMatch } from "./ingest.js";
 import { freshness, retention } from "./retention.js";
 import { robloxKind, robloxWebhookText } from "./roblox.js";
 import { anomalies, digest } from "./scan.js";
 export { DEFAULTS, field, MAX_SCAN_RULES, short, who } from "./config.js";
+export { SCHEMA_VERSION } from "./ingest.js";
 export { robloxAlertText, robloxKind } from "./roblox.js";
 /** Checks a game's config (it throws on a wrong one, when the Worker loads) and binds the parts to it. */
 export function createKit(given) {
@@ -53,6 +54,8 @@ function logged(message) {
 export function createWorker(given) {
     const kit = createKit(given);
     const { config } = kit;
+    // One limiter for the Worker's life: its counts are the state the bound on posts is kept in.
+    const limiter = createLimiter(config);
     async function route(request, env, ctx) {
         const url = new URL(request.url);
         // Roblox's webhooks: an analytics alert, a refund, a right-to-erasure request. The token is in
@@ -75,7 +78,7 @@ export function createWorker(given) {
         if (url.pathname === "/ingest") {
             if (request.method !== "POST")
                 return json({ error: "method_not_allowed" }, 405);
-            return ingest(config, request, env, ctx);
+            return ingest(config, request, env, ctx, limiter);
         }
         // Every other door needs the key: they read the data, delete rows or write to the chat.
         if (!(await authorised(config, request, env)))
