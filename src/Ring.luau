@@ -10,6 +10,11 @@
 --- equal: a frequent row would evict the rare ones that matter (an error, a purchase) under load. So
 --- the rows a game names `protected` or `urgent` wait in a second, small ring the bulk stream cannot
 --- evict: the noise can only ever evict itself. An `urgent` row also asks the pipe for an early post.
+---
+--- A TIER IS AN ARRAY AND A HEAD. The oldest waiting row is `rows[head]`; eviction is a step of the
+--- head and never a shift of the array, so an emit into a full ring costs the same as into an empty
+--- one. Spent rows ahead of the head are dropped by `compact`, which moves the waiting half over
+--- them once they outnumber it: the move is paid for by the emits that made it.
 const Ring = {}
 
 export type Context = { [string]: any }
@@ -61,23 +66,49 @@ export type Ring = {
 	claimDropped: () -> (number, number, number),
 }
 
--- Moves up to `want` of the oldest rows of `source` onto `batch`. Returns how many moved.
-const function move(source: { Row }, batch: { Row }, want: number): number
-	const count = math.min(#source, want)
-	for index = 1, count do
-		batch[#batch + 1] = source[index]
+type Tier = {
+	rows: { Row },
+	--> Where the oldest waiting row is: rows before it are spent, and `#rows - head + 1` wait.
+	head: number,
+}
+
+const function newTier(): Tier
+	return { rows = {}, head = 1 }
+end
+
+const function waiting(t: Tier): number
+	return #t.rows - t.head + 1
+end
+
+-- Lets the spent rows go once they outnumber the waiting ones (and there are enough of them to be
+-- worth the move): the move costs less than the emits that made the spent half, so the amortised
+-- cost of an emit stays one step of the head.
+const function compact(t: Tier)
+	if t.head > 16 and t.head > waiting(t) then
+		const last = #t.rows
+		table.move(t.rows, t.head, last, 1)
+		for index = last - t.head + 2, last do
+			t.rows[index] = nil
+		end
+		t.head = 1
 	end
-	table.move(source, count + 1, #source, 1)
-	for _ = 1, count do
-		table.remove(source)
+end
+
+-- Moves up to `want` of the tier's oldest rows onto `batch`. Returns how many moved.
+const function drain(t: Tier, batch: { Row }, want: number): number
+	const count = math.min(waiting(t), want)
+	for index = 0, count - 1 do
+		batch[#batch + 1] = t.rows[t.head + index]
 	end
+	t.head += count
+	compact(t)
 	return count
 end
 
 --> Builds one ring.
 function Ring.new(config: Config): Ring
-	const bulk: { Row } = {}
-	const protected: { Row } = {}
+	const bulk = newTier()
+	const protected = newTier()
 	local seq = 0
 	local urgent = false
 	-- Losses since the last claim, by cause, because the causes are different stories: a full ring is
@@ -91,19 +122,20 @@ function Ring.new(config: Config): Ring
 		const row: Row = { seq = seq, t = config.now(), event = event, actor = actor, ctx = ctx }
 		const priority = config.priorities[event]
 		const kept = priority == "protected" or priority == "urgent"
-		const target = if kept then protected else bulk
-		table.insert(target, row)
+		const tier = if kept then protected else bulk
+		table.insert(tier.rows, row)
 		if priority == "urgent" then
 			urgent = true
 		end
-		if #target > (if kept then config.protectedSize else config.size) then
-			table.remove(target, 1)
+		if waiting(tier) > (if kept then config.protectedSize else config.size) then
+			tier.head += 1
 			evicted += 1
 		end
+		compact(tier)
 	end
 
 	function self.size(): number
-		return #bulk + #protected
+		return waiting(bulk) + waiting(protected)
 	end
 
 	-- Taking the rows out (rather than peeking) is what makes a down ingest safe: a batch left in the
@@ -113,10 +145,10 @@ function Ring.new(config: Config): Ring
 	-- Order between the tiers is not kept and need not be: every row carries `seq` and `t`.
 	function self.take(max: number): { Row }
 		const batch: { Row } = {}
-		const took = move(protected, batch, max)
-		move(bulk, batch, max - took)
+		const took = drain(protected, batch, max)
+		drain(bulk, batch, max - took)
 		-- Every urgent row rides the protected ring, so a take that emptied it has carried them all.
-		if #protected == 0 then
+		if waiting(protected) == 0 then
 			urgent = false
 		end
 		return batch
@@ -124,11 +156,11 @@ function Ring.new(config: Config): Ring
 
 	function self.recent(count: number?): { Row }
 		const all: { Row } = {}
-		for _, row in bulk do
-			table.insert(all, row)
+		for index = bulk.head, #bulk.rows do
+			table.insert(all, bulk.rows[index])
 		end
-		for _, row in protected do
-			table.insert(all, row)
+		for index = protected.head, #protected.rows do
+			table.insert(all, protected.rows[index])
 		end
 		table.sort(all, function(a: Row, b: Row): boolean
 			return a.seq < b.seq
