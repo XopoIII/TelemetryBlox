@@ -1,0 +1,82 @@
+# A tag is a release. The gates of `checks.yaml` run first — a version is published only from a
+# tree that passes everything — then the pesde package is published under the version of
+# pesde.toml, and the GitHub release is made with the changelog's section for that version.
+#
+# THE TAG MUST NAME THE VERSION: `v0.4.0` releases the tree whose pesde.toml and package.json say
+# `0.4.0`. A mismatch fails before anything is published, so a tag can never ship the wrong tree.
+#
+# Needs the repository secret PESDE_TOKEN: `pesde auth login` once by hand, then `pesde auth
+# token` to read it back. Without the secret the publish step fails and the tag stays a tag.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: CompeyDev/setup-rokit@v0.2.1
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: 26.9.0
+
+      - name: Install
+        run: npm ci
+
+      # The same gates as checks.yaml, in the same order: what a push proves, a release re-proves.
+      - name: Gates
+        run: |
+          stylua --check src tests
+          selene src tests
+          sh scripts/check-strict.sh
+          sh scripts/check-file-size.sh
+          sh scripts/check-english.sh
+          sh scripts/type-check.sh
+          sh scripts/check-package.sh
+          sh scripts/run-tests.sh
+          luneblox run tests/Mutate --yes
+          sh scripts/check-worker.sh
+
+      - name: The tag names the version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pesde_version="$(sed -n 's/^version = "\(.*\)"/\1/p' pesde.toml)"
+          npm_version="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pesde_version" ] || [ "$tag" != "$npm_version" ]; then
+            echo "tag $GITHUB_REF_NAME, pesde.toml $pesde_version, package.json $npm_version: they must agree"
+            exit 1
+          fi
+
+      - name: Publish the pesde package
+        run: |
+          pesde auth login --token "${{ secrets.PESDE_TOKEN }}"
+          pesde publish --yes
+
+      - name: The GitHub release, with the changelog's section
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME exists already; leaving it as it is"
+            exit 0
+          fi
+          notes="$(awk -v v="$version" '
+            $0 ~ "^## " v " - " { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md)"
+          if [ -z "$notes" ]; then
+            echo "CHANGELOG.md has no section for $version"
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes "$notes"
