@@ -6,6 +6,14 @@ by the same tag.
 
 ## Unreleased
 
+### Fixed
+
+The pipe:
+- A Studio server no longer sends an empty job id. The ingest names a batch by (job id, server
+  start, first row), and two Studio servers started in the same second shared that identity: the
+  second one's rows were ignored as a copy of the first's. The engine adapter now gives a Studio
+  server a made-up id of its own (`studio-<guid>`), one per server.
+
 ## 0.3.0 - 2026-10-08
 
 ### Added

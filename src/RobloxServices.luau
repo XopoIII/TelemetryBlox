@@ -36,12 +36,25 @@ function RobloxServices.build(): Services.Services
 		task.spawn(fn)
 	end
 
+	-- `game.JobId` is empty in Studio, and the ingest names a batch by (job id, server start, first
+	-- row): two Studio servers started in the same second would share a batch's identity, and the
+	-- second one's rows would be ignored as a copy. So a Studio server gets a made-up id of its own,
+	-- one per server, made here where the engine is.
+	local studioJobId: string? = nil
+
 	function services.server(): Services.Server
+		local jobId = game.JobId
+		if jobId == "" then
+			if studioJobId == nil then
+				studioJobId = `studio-{httpService:GenerateGUID(false)}`
+			end
+			jobId = studioJobId :: string
+		end
 		return {
 			universeId = tostring(game.GameId),
 			placeId = tostring(game.PlaceId),
 			placeVersion = game.PlaceVersion,
-			jobId = game.JobId,
+			jobId = jobId,
 		}
 	end
 

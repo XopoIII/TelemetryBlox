@@ -369,7 +369,7 @@ A batch is one JSON object, posted with `content-type: application/json` and the
 	"universeId": "111",
 	"placeId": "222",
 	"placeVersion": 7,
-	"jobId": "<game.JobId; empty in Studio>",
+	"jobId": "<game.JobId; in Studio a made-up one, `studio-<guid>`>",
 	"env": "live",
 	"serverStart": 1800000000,
 	"sentAt": 1800000035,
