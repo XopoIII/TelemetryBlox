@@ -1,8 +1,9 @@
 /**
  * The ingest: receives a batch from the game server's pipe (`src/Pipe.luau`) and stores it as ONE
  * row in D1 (`batches`), the events inside it as a JSON array; the `events` view expands them back
- * for queries. It checks the key, bounds the body, validates, de-duplicates and inserts, nothing
- * more: aggregating on write would throw away the raw rows the pipe exists to keep.
+ * for queries. It checks the key, bounds the body, refuses a batch from a newer pipe or from a
+ * server posting past its minute's share, validates, de-duplicates and inserts, nothing more:
+ * aggregating on write would throw away the raw rows the pipe exists to keep.
  *
  * Cloudflare's free plan shaped it:
  *   - 100,000 rows WRITTEN a day, index writes included -> a row per batch, one index.
@@ -13,6 +14,13 @@
 
 import { alertsFor, deliver } from "./alerts.js";
 import { database, type Env, type Resolved, type SeenEvent, secret } from "./config.js";
+
+/**
+ * The newest envelope this ingest reads: the pipe's `Pipe.SCHEMA_VERSION`. A batch from a newer
+ * pipe is refused rather than stored half-understood; one from an older pipe still lands, so an
+ * old game server keeps working against an updated Worker.
+ */
+export const SCHEMA_VERSION = 1;
 
 const INSERT_SQL = `INSERT OR IGNORE INTO batches
 	(received_at, env, schema_version, universe_id, place_id, place_version, job_id, server_start,
@@ -70,10 +78,63 @@ export function asText(value: unknown): string | null {
 	return typeof value === "string" ? value : null;
 }
 
+interface Window {
+	count: number;
+	resetAt: number;
+}
+
+/**
+ * A bound on how fast batches may arrive. What it protects is the free plan: the day's written
+ * rows are a hundred thousand, and a compromised key or a game stuck in a posting loop would spend
+ * them in minutes, after which every honest server's batch is refused until midnight. A refused
+ * post is a 429, which the pipe holds and posts again, so the cost of a false positive is a delay.
+ *
+ * The counts live in the Worker's memory: one more table would spend the very rows being saved.
+ * That makes the bound per isolate and best-effort — Cloudflare runs as many isolates as it likes —
+ * which is enough against a loop, if not against a determined flood. Nothing here replaces the
+ * key; it only slows what the key's holder can break.
+ */
+export interface IngestLimiter {
+	/** Whether one more batch of `jobId` may arrive this minute. */
+	allow: (jobId: string, now?: number) => boolean;
+}
+
+/** One limiter per Worker (per game), over one minute windows. */
+export function createLimiter(config: Resolved): IngestLimiter {
+	const servers = new Map<string, Window>();
+	let all: Window = { count: 0, resetAt: 0 };
+
+	const fresh = (now: number): Window => ({ count: 0, resetAt: now + 60 });
+
+	return {
+		allow(jobId, now = Math.floor(Date.now() / 1000)) {
+			if (now >= all.resetAt) all = fresh(now);
+			if (all.count >= config.maxBatchesPerMinute) return false;
+			let server = servers.get(jobId);
+			if (!server || now >= server.resetAt) {
+				server = fresh(now);
+				servers.set(jobId, server);
+				// A flood of made-up job ids must not grow the map without end.
+				if (servers.size > 10_000) {
+					for (const [id, kept] of servers) if (now >= kept.resetAt) servers.delete(id);
+					if (servers.size > 10_000) servers.clear();
+				}
+			}
+			if (server.count >= config.maxServerBatchesPerMinute) return false;
+			all.count++;
+			server.count++;
+			return true;
+		},
+	};
+}
+
 /** Validates the envelope. Returns what is wrong with it, or null when it is usable. */
 function validateEnvelope(config: Resolved, body: Envelope): string | null {
 	if (typeof body !== "object" || body === null) return "the body must be an object";
-	if (asInt(body.schemaVersion) === null) return "schemaVersion must be a number";
+	const version = asInt(body.schemaVersion);
+	if (version === null) return "schemaVersion must be a number";
+	if (version > SCHEMA_VERSION)
+		return `schemaVersion ${version} is newer than this ingest reads (${SCHEMA_VERSION}): update the Worker`;
 	if (!asText(body.universeId)) return "universeId must be a string";
 	if (!asText(body.placeId)) return "placeId must be a string";
 	if (typeof body.env !== "string" || !config.environments.includes(body.env)) {
@@ -105,7 +166,13 @@ function clean(raw: unknown): CleanEvent | null {
 	return actor ? { seq, t, event, actor, ctx } : { seq, t, event, ctx };
 }
 
-export async function ingest(config: Resolved, request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
+export async function ingest(
+	config: Resolved,
+	request: Request,
+	env: Env,
+	ctx?: ExecutionContext,
+	limiter?: IngestLimiter,
+): Promise<Response> {
 	if (!(await authorised(config, request, env))) return json({ error: "unauthorized" }, 401);
 
 	// The body is the sender's to choose, so it is bounded twice: by what it says of itself before a
@@ -127,6 +194,14 @@ export async function ingest(config: Resolved, request: Request, env: Env, ctx?:
 	const invalid = validateEnvelope(config, body);
 	if (invalid) return json({ error: "invalid_envelope", detail: invalid }, 400);
 
+	const jobId = asText(body.jobId) ?? "";
+	// After validation (the limit is the pipe's problem only once the batch says whose it is) and
+	// before the insert (the write is what is being saved). A 429 is held and posted again.
+	if (limiter && !limiter.allow(jobId)) {
+		console.log(JSON.stringify({ message: "ingest_rate_limited", jobId }));
+		return json({ error: "rate_limited" }, 429);
+	}
+
 	const incoming = body.events as unknown[];
 	const events: CleanEvent[] = [];
 	let firstSeq = Number.POSITIVE_INFINITY;
@@ -141,7 +216,6 @@ export async function ingest(config: Resolved, request: Request, env: Env, ctx?:
 	const skipped = incoming.length - events.length;
 	if (events.length === 0) return json({ ok: true, accepted: 0, skipped });
 
-	const jobId = asText(body.jobId) ?? "";
 	let stored: number;
 	try {
 		// ONE query. The same batch sent again hits the unique index and is ignored: the pipe holds a

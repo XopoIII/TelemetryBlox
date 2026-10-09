@@ -351,6 +351,44 @@ test("the binding and the secrets are called what the game calls them", async ()
 	assert.equal((await call(environment(), "/ingest", { body: one(), handler: lost })).status, 500);
 });
 
+test("a batch from a newer pipe is refused with why, not stored half-understood", async () => {
+	const env = environment();
+	const refused = await call(env, "/ingest", { body: one({ schemaVersion: 99 }) });
+	assert.equal(refused.status, 400);
+	assert.match(refused.body.detail, /schemaVersion 99 is newer than this ingest reads \(1\)/);
+	assert.equal(stored(env), 0);
+	// This pipe's own version still lands, beside the refusal.
+	assert.equal((await call(env, "/ingest", { body: one() })).status, 200);
+	assert.equal(stored(env), 1);
+});
+
+test("a server past its minute's share is slowed; another server is not", async () => {
+	const limited = createWorker({ game: "example", maxServerBatchesPerMinute: 3 });
+	const env = environment();
+	for (let i = 0; i < 3; i++) {
+		const body = one({ serverStart: 1000 + i });
+		assert.equal((await call(env, "/ingest", { body, handler: limited })).status, 200);
+	}
+	assert.deepEqual(await call(env, "/ingest", { body: one({ serverStart: 1003 }), handler: limited }), {
+		status: 429,
+		body: { error: "rate_limited" },
+	});
+	// The bound is per job id: another server's batch still lands.
+	assert.equal((await call(env, "/ingest", { body: one({ jobId: "job-b" }), handler: limited })).status, 200);
+	assert.equal(stored(env), 4);
+});
+
+test("a flood of servers past the ingest's minute is slowed as a whole", async () => {
+	const limited = createWorker({ game: "example", maxBatchesPerMinute: 4, maxServerBatchesPerMinute: 100 });
+	const env = environment();
+	for (let i = 0; i < 4; i++) {
+		const body = one({ jobId: `job-${i}` });
+		assert.equal((await call(env, "/ingest", { body, handler: limited })).status, 200);
+	}
+	assert.equal((await call(env, "/ingest", { body: one({ jobId: "job-new" }), handler: limited })).status, 429);
+	assert.equal(stored(env), 4);
+});
+
 test("a config that is wrong fails when the Worker is made, not on the first batch", () => {
 	const wrong = (config, problem) =>
 		assert.throws(() => createWorker(config), { message: `TelemetryBlox: ${problem}` });
@@ -359,6 +397,8 @@ test("a config that is wrong fails when the Worker is made, not on the first bat
 	wrong({ game: "x", alerts: { boom: "loud" } }, "the alert for boom has no such severity: loud");
 	wrong({ game: "x", retentionDays: 0 }, "`retentionDays` must be a positive number");
 	wrong({ game: "x", maxAlertsPerBatch: -1 }, "`maxAlertsPerBatch` must be a positive number");
+	wrong({ game: "x", maxBatchesPerMinute: 0 }, "`maxBatchesPerMinute` must be a positive number");
+	wrong({ game: "x", maxServerBatchesPerMinute: -1 }, "`maxServerBatchesPerMinute` must be a positive number");
 	wrong({ game: "x", cooldownSeconds: { critical: -1 } }, "`cooldownSeconds.critical` must be zero or more seconds");
 	wrong({ game: "x", nightlyHourUtc: 24 }, "`nightlyHourUtc` must be an hour, 0 to 23");
 	wrong({ game: "x", environments: ["studio"] }, '`environments` must hold "live"');
