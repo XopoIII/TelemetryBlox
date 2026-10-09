@@ -118,6 +118,7 @@ that each does.
 | The bulk ring | 2000 rows (`ringSize`), oldest dropped first |
 | The protected ring | 500 rows (`protectedSize`) that the bulk stream cannot evict: `protected` and `urgent` events |
 | A refused batch | held and sent again as the same rows, 3 posts in all (`maxTries`), then counted lost |
+| A batch answered 429 | the ingest asking for time: held and sent again on the next wake without spending a try, for up to 10 posts of one batch; past that a 429 costs a try like any refusal. The log says `try = 0` for a batch that has only waited |
 | A loss | written into the stream as one row of `dropEvent`: `count`, and its parts `overflow` (a full ring), `send_failed` (the ingest never took the batch), `refused` (a call of no use) |
 | Shutdown | the drain posts what waits, waits for the leaving players' last rows, and ends once the server has been empty and silent for 2 s (`closeQuiet`) or 20 s have passed (`closeBudget`) |
 | Studio | never sends. The ring still fills, so `recent()` reads back |
@@ -261,7 +262,7 @@ migrations, the example queries and the testing helpers ride in the same package
 | `nightlyHourUtc` | 3 | The hourly run that is also the nightly one |
 | `environments` | `live`, `studio`, `test` | What a batch may call its server. Only `live` alerts |
 | `maxBodyBytes`, `maxEvents` | 1,000,000, 2000 | The bounds on a body |
-| `maxBatchesPerMinute`, `maxServerBatchesPerMinute` | 1,200, 60 | How fast batches may arrive, over every server and from one (by job id). The surplus is refused with a 429, which the pipe holds and posts again |
+| `maxBatchesPerMinute`, `maxServerBatchesPerMinute` | 1,200, 60 | How fast batches may arrive, over every server and from one (by job id). The surplus is refused with a 429, which the pipe holds and posts again without spending a try: a delay for a running server, and a loss only for a closing one still refused when its drain's budget ends. A running server posts once a tick; a closing one posts its backlog back to back, three batches and a few with the pipe's defaults |
 | `marks` | `[critical]` `[warning]` `[info]` `[digest]` `[notice]` `[roblox]`, and `cut`: `...` | What starts each kind of message, and what ends a value that was cut short |
 | `robloxPrefix` | `marks.roblox` and the game's name | `(kind) => string`: what starts a Roblox webhook's message, by its kind (`erasure`, `test`, `refund`, `event`, `alert`) |
 | `channels` | none | More chats than the one, by name: `{ money: { token: "MONEY_BOT_TOKEN", chat: "MONEY_CHAT_ID" } }` names the two secrets of another bot and chat. An alert rule with `channel: "money"` is sent there |

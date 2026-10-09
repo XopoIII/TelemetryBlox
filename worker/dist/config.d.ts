@@ -137,12 +137,16 @@ export interface WorkerConfig {
     /**
      * Batches the ingest takes a minute, over every server. 1,200 by default. A compromised key or a
      * game stuck in a posting loop would otherwise spend the day's written rows in minutes; the
-     * surplus is refused with a 429, which the pipe holds and posts again.
+     * surplus is refused with a 429, which the pipe holds and posts again without spending a try.
      */
     maxBatchesPerMinute?: number;
     /**
-     * Batches the ingest takes from one server a minute. 60 by default: the shutdown drain retries
-     * every two seconds, and nothing in the pipe posts faster. Counted by the batch's job id.
+     * Batches the ingest takes from one server a minute. 60 by default. A running server posts once
+     * a tick at most. A closing one posts its backlog back to back, one batch after another as each
+     * is taken, and retries a refused one every two seconds: with the pipe's defaults that is three
+     * batches and a few more, far under the bound. A game that raises `ringSize` or lowers
+     * `maxBatch` until a drain is more than sixty batches raises this with them. Counted by the
+     * batch's job id.
      */
     maxServerBatchesPerMinute?: number;
     marks?: Partial<Marks>;

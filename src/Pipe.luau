@@ -16,6 +16,12 @@
 --- rows' own numbers), so a post that landed without its answer is ignored by the ingest rather than
 --- stored twice. After `maxTries` posts the batch is counted lost.
 ---
+--- A 429 IS THE INGEST ASKING FOR TIME, not a refusal of the batch: its limiter is over a minute, and
+--- the same batch is welcome in the next. So a 429 holds the batch without spending one of its tries,
+--- for at most `MAX_WAITS` posts of one batch; past that a 429 costs a try like any other answer, so
+--- an ingest that says nothing else cannot hold a batch for ever. It buys no extra request: a held
+--- batch is posted once a wake, as it always was, and the drain still ends at its budget.
+---
 --- THE FIRST WAKE IS STAGGERED. A publish or a surge starts many servers in the same second, and a
 --- fleet whose flushers wake together posts together for its whole life. The first wait is the job
 --- id's hash within the tick (`stagger`), so the fleet spreads its posts across the minute and keeps
@@ -34,6 +40,10 @@ Pipe.SCHEMA_VERSION = 1
 Pipe.CLOSE_RETRY_SECONDS = 2
 --> Seconds between looks at an empty ring while draining.
 Pipe.CLOSE_POLL_SECONDS = 0.25
+--> The status an ingest answers when batches arrive faster than it takes them.
+Pipe.TOO_MANY_REQUESTS = 429
+--> Posts of one batch that may be answered 429 without costing it a try.
+Pipe.MAX_WAITS = 10
 
 --> Seconds before the flusher's first wake: the job id's hash within the tick, so servers that
 --> started together do not post together. Deterministic: the same server wakes at the same offset.
@@ -87,6 +97,7 @@ function Pipe.new(config: Config, ring: Ring.Ring, services: Services.Services):
 	const serverStart = services.now()
 	local held: { Ring.Row }? = nil
 	local tries = 0
+	local waits = 0
 	local posted = services.clock()
 
 	-- `jobId` is not decoration: Roblox's own logs are addressed per server job, so carrying it lets
@@ -108,9 +119,9 @@ function Pipe.new(config: Config, ring: Ring.Ring, services: Services.Services):
 	end
 
 	-- One post. Returns whether the ingest took the batch, and why not when it did not (the HTTP
-	-- status, or the error: a 401 is the secret, a 400 the payload). Never raises: a transport
-	-- failure is data lost, not a fault of the game.
-	const function post(rows: { Ring.Row }): (boolean, string?)
+	-- status, or the error: a 401 is the secret, a 400 the payload), with the status when there was
+	-- an answer. Never raises: a transport failure is data lost, not a fault of the game.
+	const function post(rows: { Ring.Row }): (boolean, string?, number?)
 		const ok, result = pcall(function(): Services.Response
 			const headers: { [string]: Services.HeaderValue } = { ["content-type"] = "application/json" }
 			-- A missing secret must not stop the flusher: the batch goes without a key and the ingest
@@ -122,12 +133,12 @@ function Pipe.new(config: Config, ring: Ring.Ring, services: Services.Services):
 			return services.request(config.destination, headers, services.encode(envelope(rows)))
 		end)
 		if not ok then
-			return false, tostring(result)
+			return false, tostring(result), nil
 		end
 		if result.Success == true then
-			return true, nil
+			return true, nil, result.StatusCode
 		end
-		return false, `http {result.StatusCode}`
+		return false, `http {result.StatusCode}`, result.StatusCode
 	end
 
 	const self = {} :: Pipe
@@ -148,18 +159,26 @@ function Pipe.new(config: Config, ring: Ring.Ring, services: Services.Services):
 		else
 			batch = ring.take(config.maxBatch)
 		end
-		const sent, why = post(batch)
+		const sent, why, status = post(batch)
 		if sent then
+			waits = 0
 			held = nil
 			tries = 0
 			return true
 		end
-		tries += 1
+		-- Asked to wait: the batch is held with its tries as they were (`try` in the log is the
+		-- tries spent, so a batch that has only waited says 0).
+		if status == Pipe.TOO_MANY_REQUESTS and waits < Pipe.MAX_WAITS then
+			waits += 1
+		else
+			tries += 1
+		end
 		if tries < config.maxTries then
 			held = batch
 			services.warn("telemetry.send_retry", { count = #batch, try = tries, reason = why })
 			return false
 		end
+		waits = 0
 		held = nil
 		tries = 0
 		ring.addUnsent(#batch)

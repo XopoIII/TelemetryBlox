@@ -153,7 +153,7 @@ export async function ingest(config, request, env, ctx, limiter) {
         return json({ error: "invalid_envelope", detail: invalid }, 400);
     const jobId = asText(body.jobId) ?? "";
     // After validation (the limit is the pipe's problem only once the batch says whose it is) and
-    // before the insert (the write is what is being saved). A 429 is held and posted again.
+    // before the insert (the write is what is being saved). The pipe holds a 429 and posts it again.
     if (limiter && !limiter.allow(jobId)) {
         console.log(JSON.stringify({ message: "ingest_rate_limited", jobId }));
         return json({ error: "rate_limited" }, 429);

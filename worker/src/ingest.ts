@@ -87,7 +87,10 @@ interface Window {
  * A bound on how fast batches may arrive. What it protects is the free plan: the day's written
  * rows are a hundred thousand, and a compromised key or a game stuck in a posting loop would spend
  * them in minutes, after which every honest server's batch is refused until midnight. A refused
- * post is a 429, which the pipe holds and posts again, so the cost of a false positive is a delay.
+ * post is a 429. The pipe holds that batch and posts it again without spending one of its tries,
+ * for up to ten posts of one batch, so a false positive costs a running server a delay. A closing
+ * server has only its drain's budget (twenty seconds by default) to wait in: a batch still refused
+ * when that ends is lost with the server.
  *
  * The counts live in the Worker's memory: one more table would spend the very rows being saved.
  * That makes the bound per isolate and best-effort — Cloudflare runs as many isolates as it likes —
@@ -196,7 +199,7 @@ export async function ingest(
 
 	const jobId = asText(body.jobId) ?? "";
 	// After validation (the limit is the pipe's problem only once the batch says whose it is) and
-	// before the insert (the write is what is being saved). A 429 is held and posted again.
+	// before the insert (the write is what is being saved). The pipe holds a 429 and posts it again.
 	if (limiter && !limiter.allow(jobId)) {
 		console.log(JSON.stringify({ message: "ingest_rate_limited", jobId }));
 		return json({ error: "rate_limited" }, 429);

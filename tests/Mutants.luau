@@ -8,11 +8,12 @@ const Options = require("./slips/Options")
 const Parts = require("./slips/Parts")
 const Pipe = require("./slips/Pipe")
 const Ring = require("./slips/Ring")
+const Throttle = require("./slips/Throttle")
 
 export type Mutant = Mutant.Mutant
 
 const MUTANTS: { Mutant } = {}
-for _, list in { Ring, Pipe, Clean, Parts, Options, Door } do
+for _, list in { Ring, Pipe, Throttle, Clean, Parts, Options, Door } do
 	for _, mutant in list do
 		table.insert(MUTANTS, mutant)
 	end
