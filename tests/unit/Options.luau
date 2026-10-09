@@ -137,6 +137,42 @@ Spec.test("a number that is not positive is an error that says which", function(
 	Spec.equal(Options.resolve(with("closeQuiet", 0.25), false).pipe.closeQuiet, 0.25, "a fraction is fine")
 end)
 
+Spec.test("a count is a whole number, a time may be a fraction", function()
+	for _, field in { "maxBatch", "ringSize", "protectedSize", "maxTries", "maxStringBytes", "maxDepth" } do
+		Spec.throws(function()
+			Options.resolve(with(field, 2.5), false)
+		end, `\`{field}\` must be a whole number`)
+	end
+	Spec.equal(Options.resolve(with("tickSeconds", 2.5), false).pipe.tickSeconds, 2.5, "a fractional tick is fine")
+end)
+
+Spec.test("a tick is never slower than a flush", function()
+	-- The default tick is 60: a faster flush than that leaves an urgent row waiting past a post.
+	Spec.throws(function()
+		Options.resolve(with("flushSeconds", 30), false)
+	end, "`tickSeconds` must not exceed `flushSeconds`")
+	Spec.throws(function()
+		Options.resolve(with("tickSeconds", 200), false)
+	end, "`tickSeconds` must not exceed `flushSeconds`")
+	const given = with("flushSeconds", 60)
+	Spec.equal(Options.resolve(given, false).pipe.tickSeconds, 60, "equal stands")
+end)
+
+Spec.test("an endpoint is https or nothing", function()
+	Spec.throws(function()
+		Options.resolve(with("endpoint", "http://ingest.test/ingest"), false)
+	end, "`endpoint` must be an https URL")
+	Spec.throws(function()
+		Options.resolve(with("endpoint", "ingest.test/ingest"), false)
+	end, "`endpoint` must be an https URL")
+	Spec.equal(Options.resolve(with("endpoint", ""), false).pipe.destination, "", "empty only collects")
+	Spec.equal(
+		Options.resolve(with("endpoint", "https://ingest.test/other"), false).pipe.destination,
+		"https://ingest.test/other",
+		"https stands"
+	)
+end)
+
 Spec.test("a vocabulary that is not names and priorities is an error", function()
 	Spec.throws(function()
 		Options.resolve(with("events", nil), false)

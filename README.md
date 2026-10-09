@@ -121,6 +121,7 @@ that each does.
 | A loss | written into the stream as one row of `dropEvent`: `count`, and its parts `overflow` (a full ring), `send_failed` (the ingest never took the batch), `refused` (a call of no use) |
 | Shutdown | the drain posts what waits, waits for the leaving players' last rows, and ends once the server has been empty and silent for 2 s (`closeQuiet`) or 20 s have passed (`closeBudget`) |
 | Studio | never sends. The ring still fills, so `recent()` reads back |
+| The first wake | staggered within one tick by the hash of the server's job id, so a fleet that started together does not post together |
 
 ### The API
 
@@ -142,7 +143,9 @@ that each does.
 `environment` (what a server outside Studio is called: `"live"` by default, `"test"` for a test
 place), `placeVersion`, `flushSeconds`, `tickSeconds`, `maxBatch`, `ringSize`, `protectedSize`,
 `maxTries`, `closeBudget`, `closeQuiet`, `maxStringBytes` (1000), `maxDepth` (4) and `log` are optional. A wrong option is an error when the
-telemetry is made, at boot.
+telemetry is made, at boot: an endpoint is `https://` or empty (a plain one would carry the ingest
+key in the clear), a count of rows or levels is a whole number, and `tickSeconds` never exceeds
+`flushSeconds` (a slower tick would hold an urgent row longer than a regular post takes).
 
 A priority is `"bulk"`, `"protected"` or `"urgent"`. The drop event is protected unless the game says
 urgent, and cannot be bulk: the flood it reports would evict it.
@@ -257,6 +260,7 @@ migrations, the example queries and the testing helpers ride in the same package
 | `nightlyHourUtc` | 3 | The hourly run that is also the nightly one |
 | `environments` | `live`, `studio`, `test` | What a batch may call its server. Only `live` alerts |
 | `maxBodyBytes`, `maxEvents` | 1,000,000, 2000 | The bounds on a body |
+| `maxBatchesPerMinute`, `maxServerBatchesPerMinute` | 1,200, 60 | How fast batches may arrive, over every server and from one (by job id). The surplus is refused with a 429, which the pipe holds and posts again |
 | `marks` | `[critical]` `[warning]` `[info]` `[digest]` `[notice]` `[roblox]`, and `cut`: `...` | What starts each kind of message, and what ends a value that was cut short |
 | `robloxPrefix` | `marks.roblox` and the game's name | `(kind) => string`: what starts a Roblox webhook's message, by its kind (`erasure`, `test`, `refund`, `event`, `alert`) |
 | `channels` | none | More chats than the one, by name: `{ money: { token: "MONEY_BOT_TOKEN", chat: "MONEY_CHAT_ID" } }` names the two secrets of another bot and chat. An alert rule with `channel: "money"` is sent there |
@@ -270,7 +274,7 @@ A wrong config throws when the Worker loads, not on the first batch.
 
 | Door | |
 |---|---|
-| `POST /ingest` | A batch, with the key in `x-api-key`. Checks the key in constant time, bounds the body, stores the batch as one row, and stores it once however often it arrives |
+| `POST /ingest` | A batch, with the key in `x-api-key`. Checks the key in constant time, bounds the body, refuses a batch from a newer pipe, stores the batch as one row, and stores it once however often it arrives |
 | `GET /health` | `{ ok: true }`. With `?deep=1` and the key: live batches, the newest one's age and place version |
 | `GET /retention`, `GET /anomalies` | The nightly job and the hourly scan, by hand, with the key |
 | `POST /notify` | `{ "text": "..." }` with the key: a line from the game's own tools (a publish) |

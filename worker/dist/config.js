@@ -15,6 +15,8 @@ export const DEFAULTS = {
     environments: ["live", "studio", "test"],
     maxBodyBytes: 1_000_000,
     maxEvents: 2000,
+    maxBatchesPerMinute: 1200,
+    maxServerBatchesPerMinute: 60,
     marks: {
         critical: "[critical]",
         warning: "[warning]",
@@ -153,6 +155,8 @@ export function resolve(config) {
         environments,
         maxBodyBytes: positive(config.maxBodyBytes, DEFAULTS.maxBodyBytes, "maxBodyBytes"),
         maxEvents: positive(config.maxEvents, DEFAULTS.maxEvents, "maxEvents"),
+        maxBatchesPerMinute: positive(config.maxBatchesPerMinute, DEFAULTS.maxBatchesPerMinute, "maxBatchesPerMinute"),
+        maxServerBatchesPerMinute: positive(config.maxServerBatchesPerMinute, DEFAULTS.maxServerBatchesPerMinute, "maxServerBatchesPerMinute"),
         marks,
         robloxPrefix: config.robloxPrefix ?? (() => `${marks.roblox} ${config.game}:`),
         channels,
