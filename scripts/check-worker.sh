@@ -47,4 +47,8 @@ fi
 
 node worker/bin/check-queries.mjs worker/queries
 
-echo "check-worker: types, format, build and $passed tests are clean"
+# The smoke: the committed worker/dist served by workerd itself, over a real D1. The tests prove
+# the parts; this proves the whole still runs as a Worker.
+node worker/smoke/index.mjs
+
+echo "check-worker: types, format, build, $passed tests and the smoke are clean"

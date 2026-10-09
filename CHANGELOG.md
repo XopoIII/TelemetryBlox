@@ -6,6 +6,16 @@ by the same tag.
 
 ## Unreleased
 
+### Added
+
+The repository:
+- A smoke gate (`worker/smoke/`): the committed `worker/dist` served by workerd itself — the
+  runtime Cloudflare runs — with its D1 binding over real SQLite and the kit's migrations applied.
+  A batch goes in through the front door, a duplicate is held off, and the health door answers from
+  the data. The unit tests prove the parts; the smoke proves the whole still runs as a Worker. It
+  is part of `check-worker.sh`, so hooks and CI both run it. `miniflare` joins the dev dependencies
+  for it, pinned exactly like the rest.
+
 ## 0.3.0 - 2026-10-08
 
 ### Added
