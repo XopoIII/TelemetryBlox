@@ -121,6 +121,7 @@ that each does.
 | A loss | written into the stream as one row of `dropEvent`: `count`, and its parts `overflow` (a full ring), `send_failed` (the ingest never took the batch), `refused` (a call of no use) |
 | Shutdown | the drain posts what waits, waits for the leaving players' last rows, and ends once the server has been empty and silent for 2 s (`closeQuiet`) or 20 s have passed (`closeBudget`) |
 | Studio | never sends. The ring still fills, so `recent()` reads back |
+| The first wake | staggered within one tick by the hash of the server's job id, so a fleet that started together does not post together |
 
 ### The API
 
@@ -142,7 +143,9 @@ that each does.
 `environment` (what a server outside Studio is called: `"live"` by default, `"test"` for a test
 place), `placeVersion`, `flushSeconds`, `tickSeconds`, `maxBatch`, `ringSize`, `protectedSize`,
 `maxTries`, `closeBudget`, `closeQuiet`, `maxStringBytes` (1000), `maxDepth` (4) and `log` are optional. A wrong option is an error when the
-telemetry is made, at boot.
+telemetry is made, at boot: an endpoint is `https://` or empty (a plain one would carry the ingest
+key in the clear), a count of rows or levels is a whole number, and `tickSeconds` never exceeds
+`flushSeconds` (a slower tick would hold an urgent row longer than a regular post takes).
 
 A priority is `"bulk"`, `"protected"` or `"urgent"`. The drop event is protected unless the game says
 urgent, and cannot be bulk: the flood it reports would evict it.

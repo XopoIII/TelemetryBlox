@@ -98,6 +98,15 @@ const function positive(value: unknown, fallback: number, name: string): number
 	return value
 end
 
+--> As `positive`, and whole: a count of rows or a level of depth, where half of one is a mistake.
+const function whole(value: unknown, fallback: number, name: string): number
+	const n = positive(value, fallback, name)
+	if n % 1 ~= 0 then
+		error(`TelemetryBlox: \`{name}\` must be a whole number`, 0)
+	end
+	return n
+end
+
 --> Where batches go: nowhere in Studio, nowhere without an endpoint.
 function Options.destination(endpoint: string?, isStudio: boolean): string
 	if isStudio or endpoint == nil then
@@ -128,6 +137,15 @@ function Options.resolve(options: Options<any>, isStudio: boolean): Resolved
 	if options.endpoint ~= nil and type(options.endpoint) ~= "string" then
 		error("TelemetryBlox: `endpoint` must be a string", 0)
 	end
+	-- https or nothing: every post carries the ingest key in a header, and a plain http endpoint
+	-- would carry it in the clear.
+	if
+		type(options.endpoint) == "string"
+		and options.endpoint ~= ""
+		and string.sub(options.endpoint, 1, 8) ~= "https://"
+	then
+		error("TelemetryBlox: `endpoint` must be an https URL", 0)
+	end
 	if type(options.events) ~= "table" then
 		error("TelemetryBlox: `events` must be a table of event names and their priorities", 0)
 	end
@@ -147,6 +165,12 @@ function Options.resolve(options: Options<any>, isStudio: boolean): Resolved
 	priorities[dropEvent] = priorities[dropEvent] or "protected"
 
 	const defaults = Options.DEFAULTS
+	const flushSeconds = positive(options.flushSeconds, defaults.flushSeconds, "flushSeconds")
+	const tickSeconds = positive(options.tickSeconds, defaults.tickSeconds, "tickSeconds")
+	-- A tick slower than a flush would hold an urgent row longer than a regular post takes.
+	if tickSeconds > flushSeconds then
+		error("TelemetryBlox: `tickSeconds` must not exceed `flushSeconds`", 0)
+	end
 	return {
 		pipe = {
 			destination = Options.destination(options.endpoint, isStudio),
@@ -155,21 +179,21 @@ function Options.resolve(options: Options<any>, isStudio: boolean): Resolved
 			env = Options.environment(environment, isStudio),
 			placeVersion = options.placeVersion,
 			dropEvent = dropEvent,
-			maxBatch = positive(options.maxBatch, defaults.maxBatch, "maxBatch"),
-			flushSeconds = positive(options.flushSeconds, defaults.flushSeconds, "flushSeconds"),
-			tickSeconds = positive(options.tickSeconds, defaults.tickSeconds, "tickSeconds"),
-			maxTries = positive(options.maxTries, defaults.maxTries, "maxTries"),
+			maxBatch = whole(options.maxBatch, defaults.maxBatch, "maxBatch"),
+			flushSeconds = flushSeconds,
+			tickSeconds = tickSeconds,
+			maxTries = whole(options.maxTries, defaults.maxTries, "maxTries"),
 			closeBudget = positive(options.closeBudget, defaults.closeBudget, "closeBudget"),
 			closeQuiet = positive(options.closeQuiet, defaults.closeQuiet, "closeQuiet"),
 		},
-		ringSize = positive(options.ringSize, defaults.ringSize, "ringSize"),
-		protectedSize = positive(options.protectedSize, defaults.protectedSize, "protectedSize"),
+		ringSize = whole(options.ringSize, defaults.ringSize, "ringSize"),
+		protectedSize = whole(options.protectedSize, defaults.protectedSize, "protectedSize"),
 		priorities = priorities,
 		dropEvent = dropEvent,
 		salt = text(options.salt, "salt"),
 		clean = {
-			maxString = positive(options.maxStringBytes, defaults.maxStringBytes, "maxStringBytes"),
-			maxDepth = positive(options.maxDepth, defaults.maxDepth, "maxDepth"),
+			maxString = whole(options.maxStringBytes, defaults.maxStringBytes, "maxStringBytes"),
+			maxDepth = whole(options.maxDepth, defaults.maxDepth, "maxDepth"),
 		},
 	}
 end

@@ -132,6 +132,24 @@ const MUTANTS: { Mutant.Mutant } = {
 	},
 	{
 		file = "src/Options.luau",
+		from = 'and string.sub(options.endpoint, 1, 8) ~= "https://"',
+		to = 'and string.sub(options.endpoint, 1, 7) ~= "http://"',
+		breaks = "an endpoint that is not https is refused",
+	},
+	{
+		file = "src/Options.luau",
+		from = "if n % 1 ~= 0 then",
+		to = "if false then",
+		breaks = "a count is a whole number",
+	},
+	{
+		file = "src/Options.luau",
+		from = "if tickSeconds > flushSeconds then",
+		to = "if false then",
+		breaks = "a tick is never slower than a flush",
+	},
+	{
+		file = "src/Options.luau",
 		from = "\tflushSeconds = 180,",
 		to = "\tflushSeconds = 120,",
 		breaks = "a post every three minutes by default",
@@ -180,13 +198,13 @@ const MUTANTS: { Mutant.Mutant } = {
 	},
 	{
 		file = "src/Options.luau",
-		from = 'maxString = positive(options.maxStringBytes, defaults.maxStringBytes, "maxStringBytes"),',
+		from = 'maxString = whole(options.maxStringBytes, defaults.maxStringBytes, "maxStringBytes"),',
 		to = "maxString = defaults.maxStringBytes,",
 		breaks = "the game's string limit reaches the copy",
 	},
 	{
 		file = "src/Options.luau",
-		from = 'maxDepth = positive(options.maxDepth, defaults.maxDepth, "maxDepth"),',
+		from = 'maxDepth = whole(options.maxDepth, defaults.maxDepth, "maxDepth"),',
 		to = "maxDepth = defaults.maxDepth,",
 		breaks = "the game's depth reaches the copy",
 	},
@@ -198,8 +216,8 @@ const MUTANTS: { Mutant.Mutant } = {
 	},
 	{
 		file = "src/Options.luau",
-		from = 'protectedSize = positive(options.protectedSize, defaults.protectedSize, "protectedSize"),',
-		to = 'protectedSize = positive(options.ringSize, defaults.protectedSize, "protectedSize"),',
+		from = 'protectedSize = whole(options.protectedSize, defaults.protectedSize, "protectedSize"),',
+		to = 'protectedSize = whole(options.ringSize, defaults.protectedSize, "protectedSize"),',
 		breaks = "each ring has its own size",
 	},
 }
