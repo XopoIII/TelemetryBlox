@@ -74,6 +74,11 @@ jobs:
         with:
           node-version: 26.9.0
 
+      # Before the install: a lock that names a private mirror fails `npm ci` with a network error
+      # that says nothing of the cause.
+      - name: Lockfile
+        run: sh scripts/check-lockfile.sh
+
       - name: Install
         run: npm ci
 

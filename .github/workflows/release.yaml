@@ -6,7 +6,9 @@
 # `0.4.0`. A mismatch fails before anything is published, so a tag can never ship the wrong tree.
 #
 # Needs the repository secret PESDE_TOKEN: `pesde auth login` once by hand, then `pesde auth
-# token` to read it back. Without the secret the publish step fails and the tag stays a tag.
+# token` to read it back. It prints `"Bearer gho_..."`, and the secret is that whole value
+# without the quotes: pesde keeps the token as it is given, and the bare `gho_...` is refused
+# with a 401. Without the secret the publish step fails and the tag stays a tag.
 name: Release
 
 on:
@@ -28,6 +30,9 @@ jobs:
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: 26.9.0
+
+      - name: Lockfile
+        run: sh scripts/check-lockfile.sh
 
       - name: Install
         run: npm ci
@@ -56,10 +61,24 @@ jobs:
             exit 1
           fi
 
+      # `pesde publish` exits 0 when the registry refuses it: the 401 of the first run was printed
+      # as an error and the job went on to make the release. So its words are read: only
+      # "published <name>@<version>" is a publish.
       - name: Publish the pesde package
+        env:
+          PESDE_TOKEN: ${{ secrets.PESDE_TOKEN }}
         run: |
-          pesde auth login --token "${{ secrets.PESDE_TOKEN }}"
-          pesde publish --yes
+          if [ -z "$PESDE_TOKEN" ]; then
+            echo "the repository secret PESDE_TOKEN is not set"
+            exit 1
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          pesde auth login --token "$PESDE_TOKEN"
+          pesde publish --yes 2>&1 | tee publish.log
+          if ! grep -q "published xopoiii/telemetryblox@$version " publish.log; then
+            echo "pesde did not publish $version: see its answer above"
+            exit 1
+          fi
 
       - name: The GitHub release, with the changelog's section
         env:
