@@ -16,6 +16,10 @@ set -e
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# Before anything that needs the install: a lock that names a host other than the public registry
+# is the one fault that leaves this gate unable to run at all, anywhere but where it was made.
+sh scripts/check-lockfile.sh
+
 if [ ! -d node_modules ]; then
 	echo "check-worker: node_modules is missing; run 'npm ci' in the repository root" >&2
 	exit 1
