@@ -119,6 +119,11 @@ export interface WorkerConfig {
     digest?: DigestConfig | false;
     /** Days raw batches are kept. 60 by default. */
     retentionDays?: number;
+    /**
+     * Days an alert's cool-down state is kept after it last went. 7 by default: a key quiet for
+     * that long starts over, and its row is dropped with the night.
+     */
+    alertStateDays?: number;
     /** Raw events kept whatever their age. 2,000,000 by default, about 300 MB. */
     maxRawEvents?: number;
     /** The UTC hour whose run is also the nightly one. 3 by default. */
@@ -167,6 +172,7 @@ export interface Resolved {
         text?: (day: DigestDay) => string;
     } | null;
     retentionDays: number;
+    alertStateDays: number;
     maxRawEvents: number;
     nightlyHourUtc: number;
     environments: string[];
@@ -183,6 +189,7 @@ export declare const DEFAULTS: {
     cooldownSeconds: Record<Severity, number>;
     maxAlertsPerBatch: number;
     retentionDays: number;
+    alertStateDays: number;
     maxRawEvents: number;
     nightlyHourUtc: number;
     environments: string[];

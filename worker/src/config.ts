@@ -130,6 +130,11 @@ export interface WorkerConfig {
 	digest?: DigestConfig | false;
 	/** Days raw batches are kept. 60 by default. */
 	retentionDays?: number;
+	/**
+	 * Days an alert's cool-down state is kept after it last went. 7 by default: a key quiet for
+	 * that long starts over, and its row is dropped with the night.
+	 */
+	alertStateDays?: number;
 	/** Raw events kept whatever their age. 2,000,000 by default, about 300 MB. */
 	maxRawEvents?: number;
 	/** The UTC hour whose run is also the nightly one. 3 by default. */
@@ -177,6 +182,7 @@ export interface Resolved {
 	scan: ScanRule[];
 	digest: { events: string[]; text?: (day: DigestDay) => string } | null;
 	retentionDays: number;
+	alertStateDays: number;
 	maxRawEvents: number;
 	nightlyHourUtc: number;
 	environments: string[];
@@ -194,6 +200,7 @@ export const DEFAULTS = {
 	cooldownSeconds: { critical: 600, warning: 1800, info: 0 } as Record<Severity, number>,
 	maxAlertsPerBatch: 8,
 	retentionDays: 60,
+	alertStateDays: 7,
 	maxRawEvents: 2_000_000,
 	nightlyHourUtc: 3,
 	environments: ["live", "studio", "test"],
@@ -348,6 +355,7 @@ export function resolve(config: WorkerConfig): Resolved {
 				? null
 				: { events: config.digest?.events ?? [...rules.keys()], text: config.digest?.text },
 		retentionDays: positive(config.retentionDays, DEFAULTS.retentionDays, "retentionDays"),
+		alertStateDays: positive(config.alertStateDays, DEFAULTS.alertStateDays, "alertStateDays"),
 		maxRawEvents: positive(config.maxRawEvents, DEFAULTS.maxRawEvents, "maxRawEvents"),
 		nightlyHourUtc: nightly,
 		environments,

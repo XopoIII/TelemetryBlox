@@ -10,6 +10,7 @@ export const DEFAULTS = {
     cooldownSeconds: { critical: 600, warning: 1800, info: 0 },
     maxAlertsPerBatch: 8,
     retentionDays: 60,
+    alertStateDays: 7,
     maxRawEvents: 2_000_000,
     nightlyHourUtc: 3,
     environments: ["live", "studio", "test"],
@@ -148,6 +149,7 @@ export function resolve(config) {
             ? null
             : { events: config.digest?.events ?? [...rules.keys()], text: config.digest?.text },
         retentionDays: positive(config.retentionDays, DEFAULTS.retentionDays, "retentionDays"),
+        alertStateDays: positive(config.alertStateDays, DEFAULTS.alertStateDays, "alertStateDays"),
         maxRawEvents: positive(config.maxRawEvents, DEFAULTS.maxRawEvents, "maxRawEvents"),
         nightlyHourUtc: nightly,
         environments,

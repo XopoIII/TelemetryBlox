@@ -6,6 +6,13 @@ by the same tag.
 
 ## Unreleased
 
+### Added
+
+The Worker:
+- `alertStateDays` (7): how many days an alert's cool-down state is kept after it last went. A key
+  quiet for longer starts over, and its row is dropped with the night. What was a fixed week is now
+  the game's to set.
+
 ## 0.3.0 - 2026-10-08
 
 ### Added
