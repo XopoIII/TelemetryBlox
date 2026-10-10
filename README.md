@@ -18,7 +18,7 @@ TelemetryBlox is two things in one repository:
 It was built and used inside a live game before it became a package, and holds nothing of any
 game: every event name, endpoint, secret's name, alert rule and threshold is handed in.
 
-> **Status: 0.4.0.** The pipe's rules are proven by 93 specs that run off Roblox on LuneBlox, and
+> **Status: 0.4.1.** The pipe's rules are proven by 93 specs that run off Roblox on LuneBlox, and
 > each of 185 small slips in the code makes the suite fail (`tests/Mutate.luau`). The Worker's 78
 > tests run against Node's own SQLite, which D1 is, and a smoke gate serves the built Worker in
 > local `workerd`. **What 0.4.0 changes has not yet run in a Roblox server or on Cloudflare:** the
@@ -35,7 +35,7 @@ or pin it exactly in `pesde.toml`:
 
 ```toml
 [dependencies]
-TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.4.0", target = "roblox_server" }
+TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.4.1", target = "roblox_server" }
 ```
 
 It has no dependencies. The experience needs **Allow HTTP Requests** on.
@@ -183,7 +183,7 @@ telemetry/
 		"deploy": "wrangler deploy"
 	},
 	"dependencies": {
-		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.4.0"
+		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.4.1"
 	},
 	"devDependencies": {
 		"wrangler": "4.147.0"

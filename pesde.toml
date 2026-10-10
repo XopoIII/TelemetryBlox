@@ -1,5 +1,5 @@
 name = "xopoiii/telemetryblox"
-version = "0.4.0"
+version = "0.4.1"
 description = "A game server's telemetry pipe: rows in a bounded ring, sent in batches to the game's own ingest, with no player id leaving the server"
 authors = ["XopoIII"]
 repository = "https://github.com/XopoIII/TelemetryBlox"
