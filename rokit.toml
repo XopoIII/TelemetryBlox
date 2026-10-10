@@ -9,9 +9,9 @@
 # The Worker's tools are Node's, pinned in package.json and package-lock.json.
 
 [tools]
-luneblox = "XopoIII/LuneBlox@0.10.13"       # Luau runtime for the specs
+luneblox = "XopoIII/LuneBlox@0.10.16"       # Luau runtime for the specs
 luau-lsp = "JohnnyMorganz/luau-lsp@1.70.1"  # `luau-lsp analyze` is the type gate
 selene = "Kampfkarren/selene@0.32.0"        # linter
 stylua = "JohnnyMorganz/StyLua@2.5.2"       # formatter
-lefthook = "evilmartians/lefthook@2.1.17"   # git hooks
+lefthook = "evilmartians/lefthook@2.2.1"    # git hooks
 pesde = "pesde-pkg/pesde@0.7.4+registry.0.2.3"  # packs and publishes the pesde package

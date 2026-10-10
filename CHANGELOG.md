@@ -4,7 +4,11 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
-## Unreleased
+## 0.4.1 - 2026-10-10
+
+A maintenance release. The pipe and the Worker are those of 0.4.0: `worker/dist` is unchanged,
+the wire and the tables are as they were, and no migration is added. A game that moves to it
+changes a version number and a tag.
 
 ### Fixed
 
@@ -18,6 +22,9 @@ by the same tag.
 
 - The lockfile gate runs as its own step before the install in both workflows, so a lock that
   names a private mirror says so instead of failing `npm ci` with a network error.
+- The tools the repository checks itself with are the newest releases: LuneBlox 0.10.16, which runs
+  the specs and the mutants, and lefthook 2.2.1.
+  `actions/setup-node` is 7.1.0 and `@cloudflare/workers-types` 5.20261010.1.
 
 ## 0.4.0 - 2026-10-09
 
