@@ -70,12 +70,15 @@ test("the schema is every migration in order, and can be applied twice", () => {
 		.map((row) => `${row.type} ${row.name}`);
 	assert.deepEqual(names, [
 		"index idx_batches_identity",
+		"index idx_batches_received",
 		"table actors",
 		"table alert_cursor",
 		"table alert_state",
 		"table batches",
 		"table events_daily",
 		"view events",
+		"view events_day",
+		"view events_week",
 		"view first_seen",
 	]);
 });

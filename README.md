@@ -18,7 +18,7 @@ TelemetryBlox is two things in one repository:
 It was built and used inside a live game before it became a package, and holds nothing of any
 game: every event name, endpoint, secret's name, alert rule and threshold is handed in.
 
-> **Status: 0.4.1.** The pipe's rules are proven by 93 specs that run off Roblox on LuneBlox, and
+> **Status: 0.5.0.** The pipe's rules are proven by 93 specs that run off Roblox on LuneBlox, and
 > each of 185 small slips in the code makes the suite fail (`tests/Mutate.luau`). The Worker's 78
 > tests run against Node's own SQLite, which D1 is, and a smoke gate serves the built Worker in
 > local `workerd`. **What 0.4.0 changes has not yet run in a Roblox server or on Cloudflare:** the
@@ -35,7 +35,7 @@ or pin it exactly in `pesde.toml`:
 
 ```toml
 [dependencies]
-TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.4.1", target = "roblox_server" }
+TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.5.0", target = "roblox_server" }
 ```
 
 It has no dependencies. The experience needs **Allow HTTP Requests** on.
@@ -183,7 +183,7 @@ telemetry/
 		"deploy": "wrangler deploy"
 	},
 	"dependencies": {
-		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.4.1"
+		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.5.0"
 	},
 	"devDependencies": {
 		"wrangler": "4.147.0"
@@ -415,7 +415,8 @@ pipe's. A release that leaves the version as it is (it is 1) can go out in eithe
 | | |
 |---|---|
 | `batches` | One row a batch: `id`, `received_at`, `env`, `schema_version`, `universe_id`, `place_id`, `place_version`, `job_id`, `server_start`, `first_seq`, `last_seq`, `n`, `events` (the JSON array). One unique index, on `(job_id, server_start, first_seq)` |
-| `events` (view) | One row an event: `batch_id`, `received_at`, `t`, `seq`, `event`, `actor`, `ctx` (JSON text, read with `json_extract`), and the batch's columns. **What queries read** |
+| `events` (view) | One row an event: `batch_id`, `received_at`, `t`, `seq`, `event`, `actor`, `ctx` (JSON text, read with `json_extract`), and the batch's columns. Every batch kept: a query over it costs the whole history |
+| `events_day`, `events_week` (views) | The same rows, of the batches received in the last 26 hours and the last 8 days, reached by the index on `received_at` before an event is expanded. **What queries read** |
 | `events_daily` | The roll-up kept after pruning: `day`, `event`, `env`, `universe_id`, `events`, `actors`. The row with event `*` is the whole day, and its `actors` is the day's players |
 | `actors`, `first_seen` (view) | When each player was first seen and on which place version, kept before pruning |
 | `alert_state`, `alert_cursor` | The cool-downs, and where the hourly scan stopped |
@@ -427,6 +428,13 @@ Never mix `env` values in an analysis: every query says `WHERE env = 'live'`.
 A game's saved questions are its own: SQL files in its `telemetry/queries/`, run with
 `npx wrangler d1 execute <database> --remote --file queries/<name>.sql`. Two examples to copy are in
 `worker/queries/`: `pipe-health.sql` (is the data trustworthy at all: read it first) and `daily.sql`.
+
+A query reads `events_day` or `events_week`, not `events`. D1 counts every event a query expands as
+a row read, and `events` expands every batch kept whatever the query's `WHERE t` says; on the free
+plan's 5,000,000 rows a day, a game with two million events kept could ask two such questions a
+day. A window's views reach their batches by the index on `received_at`, so a question costs the
+window's rows. A question that needs more than a week reads `events_daily`, or `events` with
+`received_at` narrowed in its own `WHERE`.
 
 A game checks every query against an empty copy of the schema in its own gate, so one that names a
 table or a column that does not exist fails there and not on launch day:
@@ -446,6 +454,10 @@ cron trigger (five an account). A server posts every three minutes when it has r
 requests and 1,900 rows written a day per server, so about fifty servers running all day is the
 ceiling. Past it D1 refuses writes until midnight UTC; the pipe holds a refused batch, then counts
 it lost as `send_failed`. Then: Workers Paid, or a larger `flushSeconds`.
+
+Reads: 5,000,000 rows a day, and an expanded event is a row. The Worker's own jobs read the hour's
+batches and the last two days'; what spends the reads is the questions a game asks, and that is
+what `events_day` and `events_week` are for ("Queries").
 
 ## Development
 
