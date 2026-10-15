@@ -4,6 +4,32 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.5.0 - 2026-10-15
+
+The wire is as it was: `schemaVersion` is 1 on both sides. The pipe is that of 0.4.1. A game that
+moves to it applies one migration (`0002_bounded_reads.sql`) and deploys its Worker.
+
+### Added
+
+- `events_day` and `events_week`: the rows of `events`, of the batches received in the last 26
+  hours and the last 8 days. D1 counts every expanded event as a row read and `events` expands
+  every batch kept, so on the free plan a live game ran out of its 5,000,000 reads a day after a
+  few dozen questions with 150,000 events kept. A window's view costs the window.
+- An index on `batches.received_at`, by which those views (and the retention's pruning) reach
+  their batches before an event is expanded. One more row written a batch.
+
+### Changed
+
+- `first_seen` takes the players the nightly job has not kept in `actors` from the last week's
+  batches instead of all of them. A database whose nightly job has not run for a week sees the
+  older players again once it runs.
+- The example `pipe-health.sql` reads `events_week`.
+
+### Not done
+
+- The read a deployed D1 counts was not measured here: the tests prove the plan uses the index
+  (Node's SQLite), not Cloudflare's count.
+
 ## 0.4.1 - 2026-10-10
 
 A maintenance release. The pipe and the Worker are those of 0.4.0: `worker/dist` is unchanged,

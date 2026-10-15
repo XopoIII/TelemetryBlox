@@ -2,6 +2,9 @@
 -- An example: copy it into the game's own telemetry/queries/ and name the game's own drop event.
 -- A dropped row does not show as a gap, it shows as a smaller count; the drop row is what makes a
 -- hole read as a hole.
+--
+-- It reads `events_week`, the last eight days' batches: a question over `events` costs every row
+-- kept, and the free plan's reads run out in a day of such questions (migration 0002).
 
 -- 1. Is anything arriving, and how fresh is it?
 SELECT
@@ -11,7 +14,7 @@ SELECT
   datetime(MIN(t), 'unixepoch')    AS first_row,
   datetime(MAX(t), 'unixepoch')    AS last_row,
   (unixepoch('now') - MAX(t)) / 60 AS minutes_since_last_row
-FROM events
+FROM events_week
 WHERE env = 'live';
 
 -- 2. Did the pipe lose anything, and which way? The drop row carries `count` and its three parts:
@@ -25,7 +28,7 @@ SELECT
   SUM(COALESCE(json_extract(ctx, '$.overflow'), 0))    AS evicted,
   SUM(COALESCE(json_extract(ctx, '$.send_failed'), 0)) AS never_taken,
   SUM(COALESCE(json_extract(ctx, '$.refused'), 0))     AS refused
-FROM events
+FROM events_week
 WHERE env = 'live' AND event = 'telemetry_drop'
 GROUP BY day
 ORDER BY day DESC;
@@ -37,7 +40,7 @@ SELECT
   COUNT(*)                       AS rows_count,
   ROUND(AVG(received_at - t), 1) AS avg_lag_s,
   MAX(received_at - t)           AS worst_lag_s
-FROM events
+FROM events_week
 WHERE env = 'live'
 GROUP BY day
 ORDER BY day DESC;
@@ -49,7 +52,7 @@ SELECT
   COUNT(*)                      AS rows_count,
   COUNT(DISTINCT actor)         AS players,
   datetime(MAX(t), 'unixepoch') AS last_seen
-FROM events
+FROM events_week
 WHERE env = 'live'
 GROUP BY event
 ORDER BY rows_count DESC;
