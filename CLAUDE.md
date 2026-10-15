@@ -104,8 +104,11 @@ The pipe (`src/`):
 - `Hash`, `Anon`: the pseudonym. `Clean`: the copy of a context a row keeps.
 - `Ring`: the two bounded tiers and the loss counters. `Pipe`: batches, retries, the flusher, the
   drain. `ErrorReporter`: the schedule server errors are reported on.
-- `Options`: what a game hands in, checked. `Services`, `RobloxServices`: the engine, behind a table.
-- `init.luau`: the front door, `TelemetryBlox.new`, and the re-exported types.
+- `Options`: what a game hands in, checked. `Services`, `RobloxServices`: the engine, behind a table,
+  `AnalyticsService` included.
+- `Calls`, `Budget`, `AnalyticsOptions`, `Analytics`: Roblox's own analytics, told what a game's
+  rows mean through the game's pure map, within Roblox's budget and caps.
+- `init.luau`: the front door, `TelemetryBlox.new`, `Telemetry.analytics`, and the re-exported types.
 
 The Worker (`worker/`):
 

@@ -4,6 +4,38 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.6.0 - 2026-10-15
+
+The wire is as it was: `schemaVersion` is 1 on both sides, `worker/dist` is unchanged and no
+migration is added. A game that moves to it changes a version number and a tag, and calls
+`telemetry.analytics` if it wants Roblox's own dashboards told.
+
+### Added
+
+- `Telemetry.analytics(options, sink?)`: Roblox's own analytics (`AnalyticsService`), told what
+  every row about a player means. The game hands in one pure `map` from a row to calls, the three
+  custom `fields` of a player, its `onboarding` steps, a `leaveEvent` and a `dropEvent`. Two
+  games of the owner each wrote this machinery for themselves; it is the same in every game.
+- `TelemetryBlox.Calls`: the six kinds of call (custom, progression start, complete or fail,
+  funnel step, onboarding step, economy, journey), a builder for each, and the check that refuses
+  one Roblox could not take, with its reason.
+- `TelemetryBlox.Budget`: calls in any sixty seconds, in constant time a call. The analytics holds
+  to 60 and 10 a player by default, half of Roblox's 120 and 20, and refuses a budget above them.
+- Roblox's caps held here: a 101st custom event name, an 11th funnel (onboarding counts) and an
+  11th currency are refused, and a name used before is told as ever.
+- An onboarding step is told once a visit, and one the budget refused is told the next time it
+  comes. A recurring funnel's run opens at its first step, with an id of the server's.
+- What analytics lost is a row of `dropEvent`, `dropped` and `invalid`, at most once a minute
+  and in the shutdown drain.
+- `Services.analytics`, optional: the engine's sink, which `RobloxServices` builds. Each call runs
+  on its own thread under pcall. A bundle without it tells nobody, and neither does Studio.
+
+### Not done
+
+- No `AnalyticsService` call was made from a Roblox server here: `RobloxServices.analytics` is
+  checked against the Roblox API by the type gate only. Roblox shows its dashboards a day after a
+  live server sends.
+
 ## 0.5.0 - 2026-10-15
 
 The wire is as it was: `schemaVersion` is 1 on both sides. The pipe is that of 0.4.1. A game that

@@ -1,0 +1,255 @@
+--!strict
+--- Mutants of Roblox's analytics: the budget, the calls, the options, the core and its front door.
+--- Every `from` must occur exactly once in its file.
+const Mutant = require("./Mutant")
+
+const MUTANTS: { Mutant.Mutant } = {
+	{
+		file = "src/Budget.luau",
+		from = "now - stamps[head] >= Budget.WINDOW",
+		to = "now - stamps[head] > Budget.WINDOW",
+		breaks = "a call leaves the window sixty seconds after it",
+	},
+	{
+		file = "src/Budget.luau",
+		from = "if tail - head + 1 >= limit + (extra or 0) then",
+		to = "if tail - head + 1 >= limit then",
+		breaks = "the extra widens the limit",
+	},
+	{
+		file = "src/Budget.luau",
+		from = "\t\t\trefused += 1\n",
+		to = "",
+		breaks = "a refused call is counted",
+	},
+	{
+		file = "src/Budget.luau",
+		from = "\t\trefused = 0\n",
+		to = "",
+		breaks = "the count of refused calls begins again once asked",
+	},
+	{
+		file = "src/Budget.luau",
+		from = "Budget.WINDOW = 60",
+		to = "Budget.WINDOW = 59",
+		breaks = "the window is sixty seconds",
+	},
+	{
+		file = "src/Budget.luau",
+		from = "\t\ttail += 1\n\t\tstamps[tail] = now\n",
+		to = "\t\ttail += 1\n\t\tstamps[tail] = now\n\t\tif tail > 2 then\n\t\t\thead, tail = 1, 0\n\t\tend\n",
+		breaks = "the window keeps every call it took",
+	},
+	{
+		file = "src/Calls.luau",
+		from = "whole(call.step, 1, Calls.MAX_STEP)",
+		to = "whole(call.step, 1)",
+		breaks = "a funnel has at most a hundred steps",
+	},
+	{
+		file = "src/Calls.luau",
+		from = "finite(value) and value % 1 == 0 and",
+		to = "finite(value) and",
+		breaks = "a level and a step are whole",
+	},
+	{
+		file = "src/Calls.luau",
+		from = "or call.amount <= 0",
+		to = "or call.amount < 0",
+		breaks = "an economy amount is above 0",
+	},
+	{
+		file = "src/Calls.luau",
+		from = "or call.balance < 0",
+		to = "or call.balance <= 0",
+		breaks = "a balance of 0 is a balance",
+	},
+	{
+		file = "src/Calls.luau",
+		from = "if key ~= 1 and key ~= 2 and key ~= 3 then",
+		to = "if key ~= 1 and key ~= 2 and key ~= 3 and key ~= 4 then",
+		breaks = "Roblox has three custom fields",
+	},
+	{
+		file = "src/Calls.luau",
+		from = "table.clone(defaults or {})",
+		to = "defaults or {}",
+		breaks = "the defaults are never changed",
+	},
+	{
+		file = "src/Calls.luau",
+		from = "elseif call.value ~= nil and not finite(call.value) then",
+		to = "elseif false then",
+		breaks = "a custom value is finite",
+	},
+	{
+		file = "src/Calls.luau",
+		from = "elseif STATUSES[call.status] ~= true then",
+		to = "elseif false then",
+		breaks = "a progression's status is one Roblox knows",
+	},
+	{
+		file = "src/AnalyticsOptions.luau",
+		from = "AnalyticsOptions.ROBLOX_LIMIT = 120",
+		to = "AnalyticsOptions.ROBLOX_LIMIT = 119",
+		breaks = "a game may use all of Roblox's 120",
+	},
+	{
+		file = "src/AnalyticsOptions.luau",
+		from = "if found[name] then",
+		to = "if false then",
+		breaks = "an onboarding step is listed once",
+	},
+	{
+		file = "src/AnalyticsOptions.luau",
+		from = "if length > AnalyticsOptions.MAX_ONBOARDING then",
+		to = "if length >= AnalyticsOptions.MAX_ONBOARDING then",
+		breaks = "a hundred onboarding steps are allowed",
+	},
+	{
+		file = "src/AnalyticsOptions.luau",
+		from = 'if dropEvent and priorities[dropEvent] == "bulk" then',
+		to = "if false then",
+		breaks = "the analytics drop event is not bulk",
+	},
+	{
+		file = "src/AnalyticsOptions.luau",
+		from = "\t\t\t0,\n\t\t\tAnalyticsOptions.ROBLOX_PER_PLAYER,",
+		to = "\t\t\t1,\n\t\t\tAnalyticsOptions.ROBLOX_PER_PLAYER,",
+		breaks = "a game may ask for nothing more a player",
+	},
+	{
+		file = "src/AnalyticsOptions.luau",
+		from = 'if type(key) ~= "number" or key < 1 or key > length or key % 1 ~= 0 then',
+		to = 'if type(key) ~= "number" then',
+		breaks = "onboarding is a list with no other keys",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = "return seen[name] == true or used < cap",
+		to = "return seen[name] == true or used <= cap",
+		breaks = "a cap is Roblox's number, not one more",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = "return seen[name] == true or used < cap",
+		to = "return used < cap",
+		breaks = "a name used before is used again past the cap",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = "local funnelCount = if next(options.steps) ~= nil then 1 else 0",
+		to = "local funnelCount = 0",
+		breaks = "the onboarding funnel is one of the ten",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = "if told and told[index] then",
+		to = "if false then",
+		breaks = "an onboarding step is told once a visit",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = "options.perPlayer * config.players()",
+		to = "options.perPlayer",
+		breaks = "the budget widens with the players",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = "if made.step == 1 or open[made.funnel] == nil then",
+		to = "if open[made.funnel] == nil then",
+		breaks = "a funnel's first step opens a new run",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = 'elseif made.kind == "funnel" and made.session == nil then',
+		to = 'elseif made.kind == "funnel" then',
+		breaks = "a game's own session is kept",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = "if name == options.leaveEvent then",
+		to = "if false then",
+		breaks = "the leave event forgets a visit",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = "if not now and at - reported < Analytics.REPORT_SECONDS then",
+		to = "if not now and at - reported <= Analytics.REPORT_SECONDS then",
+		breaks = "a report comes a minute after the last, not later",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = "if not now and at - reported < Analytics.REPORT_SECONDS then",
+		to = "if at - reported < Analytics.REPORT_SECONDS then",
+		breaks = "a report asked for comes at once",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = "if stopped or player == nil then",
+		to = "if player == nil then",
+		breaks = "a stopped analytics hears no row",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = "made.value = made.value or 1",
+		to = "made.value = made.value or 0",
+		breaks = "a custom value is 1 when left out",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = "\t\tdropped, invalid = 0, 0\n",
+		to = "",
+		breaks = "a report begins the counts again",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = "made.fields = Calls.merge(defaults, call.fields)",
+		to = "made.fields = call.fields or {}",
+		breaks = "a call carries the player's default fields",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = "\t\t\tdropped += 1\n",
+		to = "",
+		breaks = "a call past the budget is counted",
+	},
+	{
+		file = "src/Analytics.luau",
+		from = "\t\tif dropped + invalid == 0 then\n\t\t\treturn\n\t\tend\n",
+		to = "",
+		breaks = "nothing lost is nothing reported",
+	},
+	{
+		file = "src/init.luau",
+		from = "sink or (if engine.isStudio() then nil else engine.analytics) or nowhere",
+		to = "sink or engine.analytics or nowhere",
+		breaks = "Studio tells nobody",
+	},
+	{
+		file = "src/init.luau",
+		from = "players = world.playerCount,",
+		to = "players = function(): number\n\t\t\t\treturn 0\n\t\t\tend,",
+		breaks = "the players on the server widen the budget",
+	},
+	{
+		file = "src/init.luau",
+		from = "telling.report(true)",
+		to = "telling.report()",
+		breaks = "the drain reports what analytics lost",
+	},
+	{
+		file = "src/init.luau",
+		from = "\t\tif told then\n",
+		to = "\t\tif false then\n",
+		breaks = "analytics is begun once",
+	},
+	{
+		file = "src/init.luau",
+		from = "\t\t\t\tmade.stop()\n",
+		to = "",
+		breaks = "stop stops",
+	},
+}
+
+return MUTANTS

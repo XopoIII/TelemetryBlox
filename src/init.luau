@@ -19,7 +19,11 @@
 ---
 --- The library holds nothing of a game: the endpoint, the secret's name, the tag, the salt and every
 --- event name are options, passed once. See `Options`.
+const Analytics = require("@self/Analytics")
+const AnalyticsOptions = require("@self/AnalyticsOptions")
 const Anon = require("@self/Anon")
+const Budget = require("@self/Budget")
+const Calls = require("@self/Calls")
 const Clean = require("@self/Clean")
 const ErrorReporter = require("@self/ErrorReporter")
 const Options = require("@self/Options")
@@ -30,7 +34,11 @@ const Services = require("@self/Services")
 
 const TelemetryBlox = {}
 
+TelemetryBlox.Analytics = Analytics
+TelemetryBlox.AnalyticsOptions = AnalyticsOptions
 TelemetryBlox.Anon = Anon
+TelemetryBlox.Budget = Budget
+TelemetryBlox.Calls = Calls
 TelemetryBlox.Clean = Clean
 TelemetryBlox.ErrorReporter = ErrorReporter
 TelemetryBlox.Options = Options
@@ -48,6 +56,23 @@ export type Server = Services.Server
 export type HeaderValue = Services.HeaderValue
 export type Anonymiser = Anon.Anonymiser
 export type ErrorReport = ErrorReporter.Report
+export type AnalyticsOptions<Name> = AnalyticsOptions.Options<Name>
+export type AnalyticsCall = Calls.Call
+export type AnalyticsFields = Calls.Fields
+export type AnalyticsSink = Calls.Sink
+
+--> Roblox's own analytics, as a game holds it (`Telemetry.analytics`).
+export type Analytics = {
+	--> Makes `calls` for `player` that are not a row's: a fact the game has that it writes no row of.
+	tell: (player: Player, calls: { AnalyticsCall }) -> (),
+	--> Forgets what this visit of `player` was told, as the leave event does.
+	forget: (player: Player) -> (),
+	--> Calls the budget refused, and calls Roblox could not take, not yet reported.
+	dropped: () -> number,
+	invalid: () -> number,
+	--> Stops hearing rows. A call made after it does nothing.
+	stop: () -> (),
+}
 
 --> Hears every row as it is written: its name, its player and the context the row keeps.
 export type Listener<Name> = (name: Name, player: Player?, context: Context) -> ()
@@ -81,6 +106,10 @@ export type Telemetry<Name> = {
 	drain: () -> (),
 	--> Where batches go; empty when this server only collects (Studio, or no endpoint).
 	destination: string,
+	--> Tells Roblox's own analytics what every row about a player means, as `options.map` says
+	--> (`AnalyticsOptions`). `sink` is for a spec; a game passes none and gets `AnalyticsService`,
+	--> and Studio tells nobody. Raises when an option is wrong, or on a second call.
+	analytics: (options: AnalyticsOptions<Name>, sink: AnalyticsSink?) -> Analytics,
 }
 
 --> Makes a game's telemetry. `services` is for specs; a game passes none and gets the engine's.
@@ -180,7 +209,51 @@ function TelemetryBlox.new(options: Options<any>, services: Services?): Telemetr
 		return pipe.flushOnce()
 	end
 
+	local told: Analytics.Analytics? = nil
+
+	function self.analytics(given: AnalyticsOptions<any>, sink: AnalyticsSink?): Analytics
+		if told then
+			error("TelemetryBlox: analytics is already being told", 0)
+		end
+		const settings = AnalyticsOptions.resolve(given, resolved.priorities)
+		const nowhere: AnalyticsSink = function() end
+		local runs = 0
+		const made = Analytics.new({
+			options = settings,
+			sink = sink or (if engine.isStudio() then nil else engine.analytics) or nowhere,
+			clock = world.clock,
+			players = world.playerCount,
+			newId = function(): string
+				runs += 1
+				return `{world.server().jobId}-{runs}`
+			end,
+			warn = world.warn,
+			report = function(dropped: number, invalid: number)
+				if settings.dropEvent then
+					write(settings.dropEvent, nil, { dropped = dropped, invalid = invalid })
+				end
+			end,
+		})
+		told = made
+		const unhook = self.onEmit(made.handle)
+		return {
+			tell = made.tell,
+			forget = made.forget,
+			dropped = made.dropped,
+			invalid = made.invalid,
+			stop = function()
+				made.stop()
+				unhook()
+			end,
+		}
+	end
+
 	function self.drain()
+		-- What analytics lost goes first, so the drain carries it.
+		const telling = told
+		if telling then
+			telling.report(true)
+		end
 		-- It outlasts the players' own last rows: it ends once nobody is left and nothing more came.
 		pipe.drain(function(): boolean
 			return world.playerCount() == 0
