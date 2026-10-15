@@ -3,9 +3,63 @@
 ---
 --- Nothing here runs at require time: `game` is touched only inside `build()`, so the module can be
 --- required (and type-checked) anywhere.
+const Calls = require("./Calls")
 const Services = require("./Services")
 
 const RobloxServices = {}
+
+--> Roblox's own analytics: each call is made on its own thread under pcall, so it can neither yield
+--> the caller nor raise into it. A call that fails is the service's to report.
+function RobloxServices.analytics(): Calls.Sink
+	const service = game:GetService("AnalyticsService")
+	const keys = {
+		Enum.AnalyticsCustomFieldKeys.CustomField01.Name,
+		Enum.AnalyticsCustomFieldKeys.CustomField02.Name,
+		Enum.AnalyticsCustomFieldKeys.CustomField03.Name,
+	}
+
+	const function make(player: Player, call: Calls.Call)
+		const fields: { [string]: string } = {}
+		for index, value in call.fields or {} do
+			fields[keys[index]] = value
+		end
+		if call.kind == "custom" then
+			service:LogCustomEvent(player, call.name, call.value or 1, fields)
+		elseif call.kind == "progression" then
+			if call.status == "start" then
+				service:LogProgressionStartEvent(player, call.path, call.level, call.levelName, fields)
+			elseif call.status == "complete" then
+				service:LogProgressionCompleteEvent(player, call.path, call.level, call.levelName, fields)
+			else
+				service:LogProgressionFailEvent(player, call.path, call.level, call.levelName, fields)
+			end
+		elseif call.kind == "funnel" then
+			service:LogFunnelStepEvent(player, call.funnel, call.session, call.step, call.stepName, fields)
+		elseif call.kind == "onboarding" then
+			service:LogOnboardingFunnelStepEvent(player, call.index or 0, call.step, fields)
+		elseif call.kind == "economy" then
+			const flow = if call.flow == "source"
+				then Enum.AnalyticsEconomyFlowType.Source
+				else Enum.AnalyticsEconomyFlowType.Sink
+			service:LogEconomyEvent(
+				player,
+				flow,
+				call.currency,
+				call.amount,
+				call.balance,
+				call.transaction,
+				call.item,
+				fields
+			)
+		else
+			service:LogJourneyEvent(player, call.journey, call.node, call.session, fields)
+		end
+	end
+
+	return function(player: Player, call: Calls.Call)
+		task.spawn(pcall, make, player, call)
+	end
+end
 
 --> The bundle for this server. Built once, by `TelemetryBlox.new`, when a game passes none of its own.
 function RobloxServices.build(): Services.Services
@@ -95,6 +149,8 @@ function RobloxServices.build(): Services.Services
 	function services.warn(id: string, context: { [string]: any })
 		warn(`[TelemetryBlox] {id} {httpService:JSONEncode(context)}`)
 	end
+
+	services.analytics = RobloxServices.analytics()
 
 	return services
 end

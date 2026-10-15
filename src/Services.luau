@@ -6,6 +6,8 @@
 --- real adapter (`RobloxServices`) translates to the engine. The ring, the batching, the retry and the
 --- drain are therefore run off Roblox, by the VM a game runs them with.
 
+const Calls = require("./Calls")
+
 --> What the ingest answered: Roblox's `RequestAsync` result, as far as the pipe reads it.
 export type Response = {
 	Success: boolean,
@@ -52,6 +54,9 @@ export type Services = {
 	onError: (fn: (message: string, trace: string, where: string) -> ()) -> (),
 	--> Where the pipe says a post failed: the server's log.
 	warn: (id: string, context: { [string]: any }) -> (),
+	--> Roblox's own analytics (`AnalyticsService`). Optional: a bundle without it tells Roblox
+	--> nothing, and neither does Studio.
+	analytics: Calls.Sink?,
 }
 
 return nil

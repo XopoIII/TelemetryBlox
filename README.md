@@ -18,12 +18,13 @@ TelemetryBlox is two things in one repository:
 It was built and used inside a live game before it became a package, and holds nothing of any
 game: every event name, endpoint, secret's name, alert rule and threshold is handed in.
 
-> **Status: 0.5.0.** The pipe's rules are proven by 93 specs that run off Roblox on LuneBlox, and
-> each of 185 small slips in the code makes the suite fail (`tests/Mutate.luau`). The Worker's 78
+> **Status: 0.6.0.** The pipe's rules and Roblox's analytics are proven by 119 specs that run off
+> Roblox on LuneBlox, and each of 226 small slips in the code makes the suite fail
+> (`tests/Mutate.luau`). The Worker's 78
 > tests run against Node's own SQLite, which D1 is, and a smoke gate serves the built Worker in
-> local `workerd`. **What 0.4.0 changes has not yet run in a Roblox server or on Cloudflare:** the
-> engine adapter (`src/RobloxServices.luau`) is checked against the Roblox API by the type gate
-> only. The changelog's "Not done" says what that leaves unproven. Try it in a test place first.
+> local `workerd`. **The engine adapter has not run in a Roblox server here:**
+> `src/RobloxServices.luau`, which posts the batches and makes the `AnalyticsService` calls, is
+> checked against the Roblox API by the type gate only. The changelog's "Not done" says what that leaves unproven. Try it in a test place first.
 
 ## The pipe, in a game
 
@@ -35,7 +36,7 @@ or pin it exactly in `pesde.toml`:
 
 ```toml
 [dependencies]
-TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.5.0", target = "roblox_server" }
+TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.6.0", target = "roblox_server" }
 ```
 
 It has no dependencies. The experience needs **Allow HTTP Requests** on.
@@ -139,6 +140,7 @@ that each does.
 | `drops()`, `backlog()` | rows lost since the last drop row; rows waiting to leave |
 | `flush() -> boolean`, `drain()` | one post now; the shutdown drain by hand. Both yield |
 | `destination` | where batches go; `""` when this server only collects |
+| `analytics(options, sink?) -> Analytics` | tells Roblox's own analytics what every row about a player means ("Roblox's own analytics", below) |
 
 `Options<EventName>`: `game`, `salt`, `secretName`, `events`, `dropEvent` are required; `endpoint`,
 `environment` (what a server outside Studio is called: `"live"` by default, `"test"` for a test
@@ -151,10 +153,81 @@ key in the clear), a count of rows or levels is a whole number, and `tickSeconds
 A priority is `"bulk"`, `"protected"` or `"urgent"`. The drop event is protected unless the game says
 urgent, and cannot be bulk: the flood it reports would evict it.
 
+### Roblox's own analytics
+
+Roblox's Creator Hub draws an onboarding funnel, recurring funnels, progression paths, an economy
+and custom events for a game that tells `AnalyticsService`, broken down by platform, OS, age, gender
+and three custom fields of the game's. `telemetry.analytics(options)` tells it from the rows the
+game already writes: the game says, in one pure function, which calls a row about a player is, and
+the kit makes them within Roblox's limits.
+
+```lua
+local Calls = TelemetryBlox.Calls
+
+local analytics = telemetry.analytics({
+	-- What a row about a player is told as. Pure: plain data in, a list of calls out.
+	map = function(name: EventName, player: Player, context): { TelemetryBlox.AnalyticsCall }?
+		if name == "join" then
+			return { Calls.onboarding("joined"), Calls.custom("Join") }
+		elseif name == "feed" then
+			return {
+				Calls.custom("Fed", context.pieces, { [3] = context.food }),
+				Calls.economy("sink", "Food", context.pieces, context.left, "Gameplay", context.food),
+			}
+		end
+		return nil
+	end,
+	-- The three custom fields every call of this player carries, unless the call says its own.
+	fields = function(player: Player): TelemetryBlox.AnalyticsFields
+		return { [1] = "Desktop", [2] = "New" }
+	end,
+	-- FROZEN once published: Roblox keys a step by its number. Only ever add at the end.
+	onboarding = { "joined", "fed" },
+	leaveEvent = "leave",          -- a visit ends with it: the player is forgotten
+	dropEvent = "analytics_drop",  -- what was lost, as a row: `dropped`, `invalid`
+})
+```
+
+| Kind | Built with | Roblox's call |
+|---|---|---|
+| custom | `Calls.custom(name, value?, fields?)` | `LogCustomEvent`; `value` is 1 when left out |
+| progression | `Calls.progression(path, "start" \| "complete" \| "fail", level, levelName?, fields?)` | `LogProgressionStartEvent`, `...CompleteEvent`, `...FailEvent` |
+| funnel | `Calls.funnel(funnel, step, stepName, session?, fields?)` | `LogFunnelStepEvent` |
+| onboarding | `Calls.onboarding(step, fields?)` | `LogOnboardingFunnelStepEvent`, numbered by the step's place in `onboarding` |
+| economy | `Calls.economy("source" \| "sink", currency, amount, balance, transaction, item?, fields?)` | `LogEconomyEvent` |
+| journey | `Calls.journey(journey, node, session?, fields?)` | `LogJourneyEvent` |
+
+What the kit holds to:
+
+- **A budget.** Roblox allows a server 120 calls a minute and 20 more a player, and loses the rest
+  unseen. The kit holds to `limit` (60) and `perPlayer` (10) more for each player on the server,
+  in any sixty seconds; a call past it is dropped and counted, never queued. Neither may be set
+  above Roblox's own.
+- **Calls Roblox could take.** A call is checked before it is made: names are non-empty, numbers
+  finite, a level whole from 1, a funnel step whole from 1 to 100, an amount above 0, a field one of
+  three and a non-empty string. One that is not is refused, counted as invalid and said to `log`
+  once.
+- **Roblox's caps.** A new custom event name past the 100th, a funnel past the 10th (the onboarding
+  funnel is one) or a currency past the 10th is refused, and a name used before is told as ever.
+- **An onboarding step once a visit.** A step the budget refused is not marked, so it is told the
+  next time it comes. A step outside `onboarding` is refused.
+- **A funnel's run.** A funnel step with no `session` is of the player's current run of that
+  funnel, and step 1 opens a new one (`<job id>-<n>`): a recurring funnel needs no id of the game's.
+- **Nothing can hurt the game.** A map or a `fields` that raises costs its own row and is counted as
+  invalid. Each call to the engine runs on its own thread under pcall. `emit` stays total.
+- **What was lost is a row.** At most once a minute and in the shutdown drain, a row of `dropEvent`
+  says how many calls were `dropped` and how many were `invalid`.
+- **Studio tells nobody**, and neither does a `Services` bundle without `analytics`. A spec passes a
+  sink of its own, the second argument, and reads the calls it was handed.
+
+`Analytics`: `tell(player, calls)` for a fact the game writes no row of, `forget(player)`,
+`dropped()` and `invalid()` (not yet reported), `stop()`. A second `analytics` call raises, as
+does an option that is wrong.
+
 ### A game's own specs
 
 Everything of Roblox the pipe touches is one table, `TelemetryBlox.Services` (the clock, `task.wait`,
-the HTTP request, the secret, the player count, the close). A game passes none and gets the engine's;
+the HTTP request, the secret, the player count, the close, Roblox's analytics). A game passes none and gets the engine's;
 a spec passes its own as the second argument of `new` and moves the clock itself.
 `tests/fakes/World.luau` is such a table.
 
@@ -183,7 +256,7 @@ telemetry/
 		"deploy": "wrangler deploy"
 	},
 	"dependencies": {
-		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.5.0"
+		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.6.0"
 	},
 	"devDependencies": {
 		"wrangler": "4.147.0"

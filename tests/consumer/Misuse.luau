@@ -36,6 +36,24 @@ options.events.purchse = "urgent" -- error
 -- Server errors are reported under a name of the vocabulary.
 telemetry.captureErrors("server_error") -- error
 
+-- Roblox's analytics hears names of the vocabulary too: its map, its leave and its drop event.
+const analyticsOptions: TelemetryBlox.AnalyticsOptions<EventName> = {
+	map = function(): { TelemetryBlox.AnalyticsCall }?
+		return { TelemetryBlox.Calls.custom("Join") }
+	end,
+}
+analyticsOptions.leaveEvent = "join"
+analyticsOptions.leaveEvent = "left" -- error
+analyticsOptions.dropEvent = "dropped" -- error
+-- A field is a string.
+analyticsOptions.fields = function(): TelemetryBlox.AnalyticsFields
+	return { [1] = 5 } -- error
+end
+-- A call is one of the kit's.
+const _call: TelemetryBlox.AnalyticsCall = { kind = "loud", name = "Join" } -- error
+-- The positive case: options of the vocabulary compile.
+telemetry.analytics(analyticsOptions)
+
 -- A listener hears names of the vocabulary, not any string.
 telemetry.onEmit(function(name: number) -- error
 	print(name)

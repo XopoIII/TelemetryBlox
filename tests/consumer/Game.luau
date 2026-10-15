@@ -71,6 +71,41 @@ const stop: () -> () = telemetry.onEmit(function(name: EventName, player: Player
 end)
 stop()
 
+-- Roblox's own analytics, told what every row about a player means. The map is the game's, pure.
+const Calls = TelemetryBlox.Calls
+const analytics: TelemetryBlox.Analytics = telemetry.analytics({
+	map = function(name: EventName, _player: Player, context: TelemetryBlox.Context): { TelemetryBlox.AnalyticsCall }?
+		if name == "join" then
+			return { Calls.onboarding("joined"), Calls.custom("Join") }
+		elseif name == "feed" then
+			return {
+				Calls.custom("Fed", context.pieces, { [3] = "Leaf" }),
+				Calls.economy("sink", "Food", 1, 4, "Gameplay", "Leaf"),
+				Calls.progression("Foods", "complete", 2, "Leaf"),
+			}
+		elseif name == "purchase" then
+			return { Calls.funnel("Shop", 3, "Purchase"), Calls.journey("Visit", "Bought") }
+		end
+		return nil
+	end,
+	fields = function(_player: Player): TelemetryBlox.AnalyticsFields
+		return { [1] = "Desktop", [2] = "New" }
+	end,
+	onboarding = { "joined", "fed" },
+	leaveEvent = "leave",
+	dropEvent = "telemetry_drop",
+	limit = 60,
+	perPlayer = 10,
+})
+analytics.tell(Players:GetPlayers()[1], { Calls.onboarding("fed") })
+analytics.forget(Players:GetPlayers()[1])
+const _dropped: number, _invalid: number = analytics.dropped(), analytics.invalid()
+analytics.stop()
+const _call: TelemetryBlox.AnalyticsCall = Calls.custom("Join")
+const _problem: string? = Calls.problem(_call)
+const _budget: boolean = TelemetryBlox.Budget.new(60).take(os.clock())
+const _sink: TelemetryBlox.AnalyticsSink? = TelemetryBlox.RobloxServices.build().analytics
+
 -- Read back, for a Studio check or a spec in the game.
 const rows: { TelemetryBlox.Row } = telemetry.recent(10)
 for _, row in rows do
