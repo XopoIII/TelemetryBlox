@@ -18,9 +18,9 @@ TelemetryBlox is two things in one repository:
 It was built and used inside a live game before it became a package, and holds nothing of any
 game: every event name, endpoint, secret's name, alert rule and threshold is handed in.
 
-> **Status: 0.6.0.** The pipe's rules and Roblox's analytics are proven by 119 specs that run off
+> **Status: 0.7.0.** The pipe's rules and Roblox's analytics are proven by 119 specs that run off
 > Roblox on LuneBlox, and each of 226 small slips in the code makes the suite fail
-> (`tests/Mutate.luau`). The Worker's 78
+> (`tests/Mutate.luau`). The Worker's 88
 > tests run against Node's own SQLite, which D1 is, and a smoke gate serves the built Worker in
 > local `workerd`. **The engine adapter has not run in a Roblox server here:**
 > `src/RobloxServices.luau`, which posts the batches and makes the `AnalyticsService` calls, is
@@ -36,7 +36,7 @@ or pin it exactly in `pesde.toml`:
 
 ```toml
 [dependencies]
-TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.6.0", target = "roblox_server" }
+TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.7.0", target = "roblox_server" }
 ```
 
 It has no dependencies. The experience needs **Allow HTTP Requests** on.
@@ -256,7 +256,7 @@ telemetry/
 		"deploy": "wrangler deploy"
 	},
 	"dependencies": {
-		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.6.0"
+		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.7.0"
 	},
 	"devDependencies": {
 		"wrangler": "4.147.0"
@@ -519,6 +519,25 @@ npx telemetryblox-check-queries queries
 or in a test, with `checkQueries(directory)` and `freshDatabase()` from `telemetryblox/testing`,
 which is also the D1 a game's own Worker tests stand on (Node's SQLite, which D1 is).
 
+### Reading a local copy
+
+The cheapest question is one D1 never sees. `telemetryblox-mirror` keeps a SQLite file on the
+developer's machine with the kit's own schema, and brings it up to the database by primary key: a
+batch already in the copy is never read again, so a pull costs one row a new batch (a few thousand a
+day for a small game), plus the small tables `events_daily` and `actors` whole. Every saved query
+then runs on the copy unchanged, with any SQLite of 3.38 or later (`sqlite3 copy.sqlite <
+queries/day.sql`), as often as it is asked, for nothing. Run it where the game's wrangler config is:
+
+```sh
+npx telemetryblox-mirror <database> .mirror/<database>.sqlite
+# mirror: 412 new batches, 433 rows read on D1 in 5 queries; newest batch received ..., 2 min ago
+```
+
+The copy keeps what D1's retention prunes, so its history only grows; it holds pseudonyms and
+nothing else of a player, and still belongs in `.gitignore`. `WRANGLER` overrides how wrangler is
+run. In code, `openMirror(file)`, `pull(db, remote)` and `wranglerRemote(database)` from
+`telemetryblox/mirror`.
+
 ## The free plan
 
 The ingest is sized for Cloudflare's free plan: a row a batch and one index (100,000 rows written a
@@ -530,7 +549,9 @@ it lost as `send_failed`. Then: Workers Paid, or a larger `flushSeconds`.
 
 Reads: 5,000,000 rows a day, and an expanded event is a row. The Worker's own jobs read the hour's
 batches and the last two days'; what spends the reads is the questions a game asks, and that is
-what `events_day` and `events_week` are for ("Queries").
+what `events_day` and `events_week` are for, and what a local copy spends nothing of ("Reading a
+local copy"). Past the limit D1 refuses the ingest's inserts as well, so a day of questions asked of
+D1 itself can lose that day's rows.
 
 ## Development
 
