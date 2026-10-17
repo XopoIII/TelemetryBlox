@@ -4,6 +4,28 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.7.0 - 2026-10-16
+
+The wire is as it was: `schemaVersion` is 1 on both sides, the pipe and `worker/dist` are those of
+0.6.0 and no migration is added. A game that moves to it changes a version number and a tag.
+
+### Added
+
+- `telemetryblox-mirror <database> <file>` and `telemetryblox/mirror` (`openMirror`, `pull`,
+  `wranglerRemote`, `parseWrangler`): a local SQLite copy of a game's database with the kit's
+  schema, brought up to D1 by primary key. A pull reads one row a batch the copy lacks and the
+  small tables `events_daily` and `actors` whole, and says what D1 counted. A live game spent its
+  5,000,000 free reads two days running on questions asked of D1 itself; past the limit D1 also
+  refuses the ingest's inserts. Asked of the copy, a question costs nothing.
+- The copy keeps the batches D1's retention has pruned.
+
+### Not done
+
+- No pull has run against a deployed D1 here: the day it was written the account's reads were
+  already spent. `wranglerRemote` is proven over a stand-in for wrangler that prints what
+  `wrangler d1 execute --json` prints (its source, wrangler 4.149.0), and the refusal's words are
+  D1's own, as wrangler printed them that day.
+
 ## 0.6.0 - 2026-10-15
 
 The wire is as it was: `schemaVersion` is 1 on both sides, `worker/dist` is unchanged and no

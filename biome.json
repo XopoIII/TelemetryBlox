@@ -24,6 +24,7 @@
 			"worker/src/**",
 			"worker/test/**",
 			"worker/testing/**",
+			"worker/mirror/**",
 			"worker/smoke/**",
 			"worker/bin/**",
 			"worker/*.json",
