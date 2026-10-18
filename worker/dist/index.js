@@ -20,14 +20,17 @@
  *   GET  /retention         the nightly job, by hand, with the key (it deletes rows)
  *   GET  /anomalies         the hourly scan, by hand, with the key
  *   POST /notify            a line from the game's own tools (`{"text": "..."}`), with the key
+ *   POST /announce          a release, to the game's Discord webhook (`{"title", "text", "url"?}`), with the key
  *   POST /roblox-alert      Roblox's webhooks, with the webhook token in `?token=`
  */
 import { alertsFor, deliver, pruneAlertState, send } from "./alerts.js";
+import { announce, announcementOf } from "./announce.js";
 import { resolve, secret } from "./config.js";
 import { asText, authorised, createLimiter, ingest, json, secretsMatch } from "./ingest.js";
 import { freshness, retention } from "./retention.js";
 import { robloxKind, robloxWebhookText } from "./roblox.js";
 import { anomalies, digest } from "./scan.js";
+export { ANNOUNCE_TEXT, ANNOUNCE_TITLE } from "./announce.js";
 export { DEFAULTS, field, MAX_SCAN_RULES, short, who } from "./config.js";
 export { SCHEMA_VERSION } from "./ingest.js";
 export { robloxAlertText, robloxKind } from "./roblox.js";
@@ -72,7 +75,7 @@ export function createWorker(given) {
         }
         if (url.pathname === "/health" && url.searchParams.get("deep") !== "1")
             return json({ ok: true });
-        if (!["/ingest", "/health", "/retention", "/anomalies", "/notify"].includes(url.pathname)) {
+        if (!["/ingest", "/health", "/retention", "/anomalies", "/notify", "/announce"].includes(url.pathname)) {
             return json({ error: "not_found" }, 404);
         }
         if (url.pathname === "/ingest") {
@@ -91,9 +94,21 @@ export function createWorker(given) {
             return json(await kit.retention(env));
         if (url.pathname === "/anomalies")
             return json(await kit.anomalies(env));
-        // A notice from the game's own tools (a publish). `text` is said as it is, shortened.
         if (request.method !== "POST")
             return json({ error: "method_not_allowed" }, 405);
+        // A release, posted to the players' Discord channel by the game's own tools.
+        if (url.pathname === "/announce") {
+            const announcement = announcementOf(await request.json().catch(() => null));
+            if (typeof announcement === "string")
+                return json({ error: announcement }, 400);
+            const outcome = await announce(config, env, announcement);
+            if (outcome === "sent")
+                return json({ ok: true });
+            if (outcome === "unconfigured")
+                return json({ error: "announce_unconfigured" }, 503);
+            return json({ error: "discord_refused", status: outcome }, 502);
+        }
+        // A notice from the game's own tools (a publish). `text` is said as it is, shortened.
         const body = (await request.json().catch(() => null));
         const said = asText(body?.text);
         if (!said)

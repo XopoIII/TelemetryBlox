@@ -93,6 +93,8 @@ export interface BindingNames {
 	telegramChat: string;
 	/** The token in the URL Roblox's webhooks post to. "ALERT_TOKEN" by default. */
 	webhookToken: string;
+	/** The Discord webhook's URL `POST /announce` posts to. "ANNOUNCE_WEBHOOK" by default. */
+	announceWebhook: string;
 }
 
 /** What starts each kind of message. Plain text by default; a game may put its own marks here. */
@@ -240,6 +242,7 @@ export const DEFAULTS = {
 		telegramToken: "TELEGRAM_BOT_TOKEN",
 		telegramChat: "TELEGRAM_CHAT_ID",
 		webhookToken: "ALERT_TOKEN",
+		announceWebhook: "ANNOUNCE_WEBHOOK",
 	} as BindingNames,
 };
 

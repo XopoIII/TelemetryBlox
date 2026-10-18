@@ -4,12 +4,20 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
-## 0.7.0 - 2026-10-16
+## 0.7.0 - 2026-10-18
 
-The wire is as it was: `schemaVersion` is 1 on both sides, the pipe and `worker/dist` are those of
-0.6.0 and no migration is added. A game that moves to it changes a version number and a tag.
+The wire is as it was: `schemaVersion` is 1 on both sides, the pipe is that of 0.6.0 and no
+migration is added. A game that moves to it changes a version number and a tag, and sets the
+`ANNOUNCE_WEBHOOK` secret if it wants its releases posted to Discord.
 
 ### Added
+
+- `POST /announce`: a release told to the players, posted by the game's own tools with the key as
+  one embed to a Discord channel's webhook (`{ title, text, url? }`). The webhook's URL is a secret
+  named by `bindings.announceWebhook` (`ANNOUNCE_WEBHOOK` by default) and is never logged. Nobody
+  is pinged, whatever the lines say; the title and the lines are cut to Discord's 256 and 4,096.
+  A Worker without the secret answers 503, and Discord's refusal comes back as a 502 with its
+  status, so a tool can say the post did not go.
 
 - `telemetryblox-mirror <database> <file>` and `telemetryblox/mirror` (`openMirror`, `pull`,
   `wranglerRemote`, `parseWrangler`): a local SQLite copy of a game's database with the kit's
@@ -21,6 +29,8 @@ The wire is as it was: `schemaVersion` is 1 on both sides, the pipe and `worker/
 
 ### Not done
 
+- `/announce` has not posted to a real Discord webhook here: its tests answer for Discord. The
+  body is Discord's documented webhook payload (`embeds`, `allowed_mentions`).
 - No pull has run against a deployed D1 here: the day it was written the account's reads were
   already spent. `wranglerRemote` is proven over a stand-in for wrangler that prints what
   `wrangler d1 execute --json` prints (its source, wrangler 4.149.0), and the refusal's words are
