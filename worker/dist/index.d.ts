@@ -20,11 +20,14 @@
  *   GET  /retention         the nightly job, by hand, with the key (it deletes rows)
  *   GET  /anomalies         the hourly scan, by hand, with the key
  *   POST /notify            a line from the game's own tools (`{"text": "..."}`), with the key
+ *   POST /announce          a release, to the game's Discord webhook (`{"title", "text", "url"?}`), with the key
  *   POST /roblox-alert      Roblox's webhooks, with the webhook token in `?token=`
  */
 import { type Alert, type BatchMeta } from "./alerts.js";
 import { type Env, type Resolved, type SeenEvent, type WorkerConfig } from "./config.js";
 export type { Alert, BatchMeta } from "./alerts.js";
+export type { Announcement } from "./announce.js";
+export { ANNOUNCE_TEXT, ANNOUNCE_TITLE } from "./announce.js";
 export type { AlertRule, BindingNames, ChannelNames, DigestConfig, DigestDay, Env, Marks, Resolved, RobloxKind, ScanRule, SeenEvent, Severity, WorkerConfig, } from "./config.js";
 export { DEFAULTS, field, MAX_SCAN_RULES, short, who } from "./config.js";
 export { SCHEMA_VERSION } from "./ingest.js";

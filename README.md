@@ -20,7 +20,7 @@ game: every event name, endpoint, secret's name, alert rule and threshold is han
 
 > **Status: 0.7.0.** The pipe's rules and Roblox's analytics are proven by 119 specs that run off
 > Roblox on LuneBlox, and each of 226 small slips in the code makes the suite fail
-> (`tests/Mutate.luau`). The Worker's 88
+> (`tests/Mutate.luau`). The Worker's 94
 > tests run against Node's own SQLite, which D1 is, and a smoke gate serves the built Worker in
 > local `workerd`. **The engine adapter has not run in a Roblox server here:**
 > `src/RobloxServices.luau`, which posts the batches and makes the `AnalyticsService` calls, is
@@ -340,7 +340,7 @@ migrations, the example queries and the testing helpers ride in the same package
 | `robloxPrefix` | `marks.roblox` and the game's name | `(kind) => string`: what starts a Roblox webhook's message, by its kind (`erasure`, `test`, `refund`, `event`, `alert`) |
 | `channels` | none | More chats than the one, by name: `{ money: { token: "MONEY_BOT_TOKEN", chat: "MONEY_CHAT_ID" } }` names the two secrets of another bot and chat. An alert rule with `channel: "money"` is sent there |
 | `robloxChannel` | none: every webhook to the chat | `(kind) => string \| undefined`: the channel a Roblox webhook of a kind is sent to |
-| `bindings` | `DB`, `INGEST_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ALERT_TOKEN` | What the D1 binding and each secret are called |
+| `bindings` | `DB`, `INGEST_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `ALERT_TOKEN`, `ANNOUNCE_WEBHOOK` | What the D1 binding and each secret are called |
 | `erasureHint` | none | The line a right-to-erasure message ends with |
 
 A wrong config throws when the Worker loads, not on the first batch.
@@ -353,6 +353,7 @@ A wrong config throws when the Worker loads, not on the first batch.
 | `GET /health` | `{ ok: true }`. With `?deep=1` and the key: live batches, the newest one's age and place version |
 | `GET /retention`, `GET /anomalies` | The nightly job and the hourly scan, by hand, with the key |
 | `POST /notify` | `{ "text": "..." }` with the key: a line from the game's own tools (a publish) |
+| `POST /announce` | `{ "title": "...", "text": "...", "url"?: "https://..." }` with the key: a release told to the players, one embed to the game's Discord webhook. Nobody is pinged; the title and the lines are cut to Discord's 256 and 4,096. 503 without the webhook's secret, 502 with Discord's status when it refuses |
 | `POST /roblox-alert?token=` | Roblox's webhooks (an analytics alert, a refund, a right-to-erasure request), with the webhook token in the URL |
 
 **Alerts are quiet by rule.** A row of the table raises its message when its batch is stored, gravest
@@ -436,6 +437,14 @@ names the game gave it in the config.
 
 Without them the Worker writes what it would have sent to its log (`alert_unconfigured`) and
 everything else works as before.
+
+### The players' Discord channel
+
+1. In Discord, the channel's settings, Integrations, Webhooks, New Webhook: copy its URL. An
+   Announcement channel lets other servers follow it.
+2. `npx wrangler secret put ANNOUNCE_WEBHOOK` (or the name of `bindings.announceWebhook`) and paste
+   the URL. It holds the webhook's token: it is never written in a repository, a chat or a log line.
+3. Try it: `curl -s -X POST -H "x-api-key: $TELEMETRY_INGEST_KEY" --data '{"title":"Hello","text":"A first post"}' https://<worker host>/announce`.
 
 ## The wire
 

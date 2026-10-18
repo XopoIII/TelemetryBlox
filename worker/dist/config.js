@@ -33,6 +33,7 @@ export const DEFAULTS = {
         telegramToken: "TELEGRAM_BOT_TOKEN",
         telegramChat: "TELEGRAM_CHAT_ID",
         webhookToken: "ALERT_TOKEN",
+        announceWebhook: "ANNOUNCE_WEBHOOK",
     },
 };
 /** The scan binds three values a rule and D1 takes a hundred in a statement. */
