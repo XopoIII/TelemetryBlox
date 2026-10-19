@@ -211,6 +211,46 @@ test("the cool-downs are the game's to set, by weight and by rule", async () => 
 	]);
 });
 
+test("a kind with a burst is sent only when its rows crowd into the window, once a window", async () => {
+	const crowded = createKit({
+		game: "Example Game",
+		alerts: { save_retry: { severity: "warning", burst: { count: 5, seconds: 600 }, cooldownSeconds: 0 } },
+	});
+	const retries = (n) => Array.from({ length: n }, () => ({ event: "save_retry", ctx: {} }));
+	const env = environment();
+	// Three rows of one batch are three for the window, and one more batch of one is four: none goes.
+	const three = crowded.alertsFor(retries(3), LIVE);
+	assert.deepEqual(
+		three.map((alert) => [alert.key, alert.rows, alert.burst]),
+		[["save_retry", 3, { count: 5, seconds: 600 }]],
+	);
+	assert.equal(await crowded.deliver(env, three, 1000), 0);
+	assert.equal(await crowded.deliver(env, crowded.alertsFor(retries(1), LIVE), 1100), 0);
+	assert.equal(telegram.sent.length, 0);
+	// The batch that reaches five sends, with how many the window holds.
+	assert.equal(await crowded.deliver(env, crowded.alertsFor(retries(2), LIVE), 1200), 1);
+	assert.deepEqual(texts(), ["[warning] Example Game: save_retry: {} (x2) [v49] (6 within 600 s)"]);
+	// Past the count the window is quiet, though the kind has no cool-down.
+	assert.equal(await crowded.deliver(env, crowded.alertsFor(retries(9), LIVE), 1500), 0);
+	// A window that ran out starts over with the rows that open the next.
+	assert.equal(await crowded.deliver(env, crowded.alertsFor(retries(4), LIVE), 1600), 0);
+	assert.equal(await crowded.deliver(env, crowded.alertsFor(retries(1), LIVE), 2199), 1);
+	assert.equal(texts()[1], "[warning] Example Game: save_retry: {} [v49] (5 within 600 s)");
+	assert.equal(telegram.sent.length, 2);
+	// A kind without a burst beside it sends from its first row, as it always did.
+	assert.equal(await kit.deliver(env, kit.alertsFor([{ event: "server_error", ctx: {} }], LIVE), 2200), 1);
+});
+
+test("a burst's count and seconds must be whole numbers above zero", () => {
+	const withBurst = (burst) => () =>
+		createKit({ game: "Example Game", alerts: { save_retry: { severity: "warning", burst } } });
+	assert.throws(withBurst({ count: 0, seconds: 600 }), /alerts\.save_retry\.burst\.count/);
+	assert.throws(withBurst({ count: 2.5, seconds: 600 }), /alerts\.save_retry\.burst\.count/);
+	assert.throws(withBurst({ count: 5, seconds: -1 }), /alerts\.save_retry\.burst\.seconds/);
+	assert.throws(withBurst(null), /alerts\.save_retry\.burst/);
+	assert.doesNotThrow(withBurst({ count: 5, seconds: 600 }));
+});
+
 test("a batch raises eight messages at most, or as many as the game says", async () => {
 	const many = Array.from({ length: 20 }, (_, i) => ({
 		key: `k${i}`,

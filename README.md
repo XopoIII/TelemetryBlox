@@ -18,9 +18,9 @@ TelemetryBlox is two things in one repository:
 It was built and used inside a live game before it became a package, and holds nothing of any
 game: every event name, endpoint, secret's name, alert rule and threshold is handed in.
 
-> **Status: 0.7.0.** The pipe's rules and Roblox's analytics are proven by 119 specs that run off
+> **Status: 0.8.0.** The pipe's rules and Roblox's analytics are proven by 119 specs that run off
 > Roblox on LuneBlox, and each of 226 small slips in the code makes the suite fail
-> (`tests/Mutate.luau`). The Worker's 94
+> (`tests/Mutate.luau`). The Worker's 96
 > tests run against Node's own SQLite, which D1 is, and a smoke gate serves the built Worker in
 > local `workerd`. **The engine adapter has not run in a Roblox server here:**
 > `src/RobloxServices.luau`, which posts the batches and makes the `AnalyticsService` calls, is
@@ -36,7 +36,7 @@ or pin it exactly in `pesde.toml`:
 
 ```toml
 [dependencies]
-TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.7.0", target = "roblox_server" }
+TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.8.0", target = "roblox_server" }
 ```
 
 It has no dependencies. The experience needs **Allow HTTP Requests** on.
@@ -256,7 +256,7 @@ telemetry/
 		"deploy": "wrangler deploy"
 	},
 	"dependencies": {
-		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.7.0"
+		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.8.0"
 	},
 	"devDependencies": {
 		"wrangler": "4.147.0"
@@ -324,7 +324,7 @@ migrations, the example queries and the testing helpers ride in the same package
 |---|---|---|
 | `game` | required | The name said in every message |
 | `tag` | `game` | The game's tag as its server says it. A batch tagged for another game is refused |
-| `alerts` | none | Event name to `"critical"`, `"warning"`, `"info"`, or to a rule: `severity`, `when`, `per` (`"event"`, `"actor"` or a function), `text`, `cooldownSeconds`. An event outside the table sends nothing |
+| `alerts` | none | Event name to `"critical"`, `"warning"`, `"info"`, or to a rule: `severity`, `when`, `per` (`"event"`, `"actor"` or a function), `text`, `cooldownSeconds`, `channel`, `burst` (`{ count, seconds }`). An event outside the table sends nothing |
 | `cooldownSeconds` | `{ critical: 600, warning: 1800, info: 0 }` | Seconds a repeat of each weight is held. 0: never held |
 | `maxAlertsPerBatch` | 8 | Alerts one batch, or one scan, may send |
 | `scan` | none | The hourly scan: for each player, the `rows` of an event, the `sum` of a context field or its `max`, and the `limit` at or over which somebody is told |
@@ -361,6 +361,13 @@ first, ending with the place version. A repeat of the same kind inside its cool-
 counted, and the next one past it says `(+N held since the last)`. A kind with no cool-down is never
 held. A batch sends eight at most. A batch from Studio or a test place alerts nobody. A Telegram
 outage never costs a batch: it is stored first.
+
+**A fault that is expected now and then can wait for a crowd.** A rule's `burst: { count, seconds }`
+counts its rows from every server together, and sends only from the batch that takes a window to
+`count`, saying `(N within S s)`; the rest of that window is quiet, and the next window starts over
+with the rows that open it. The cool-down then applies as to any alert. A retried write that a
+storage service refuses for a moment is the case: one is noise, a hundred in ten minutes is an
+outage. The window is kept in `alert_state` beside the cool-downs, so no migration is added.
 
 **A game may keep some messages apart**, its purchases from its faults, say. `channels` names
 another bot and chat by their two secrets, a rule's `channel` sends its alert there, and

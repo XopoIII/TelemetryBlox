@@ -38,6 +38,7 @@ export { ANNOUNCE_TEXT, ANNOUNCE_TITLE } from "./announce.js";
 export type {
 	AlertRule,
 	BindingNames,
+	Burst,
 	ChannelNames,
 	DigestConfig,
 	DigestDay,
