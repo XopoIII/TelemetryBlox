@@ -4,6 +4,21 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.8.0 - 2026-10-20
+
+The wire is as it was: `schemaVersion` is 1 on both sides and no migration is added. A game that
+moves to it changes a version number and a tag.
+
+### Added
+
+- `AlertRule.burst: { count, seconds }`: an alert that goes only when `count` rows of its kind came
+  within `seconds`, from every server together, and once a window: the batch that reaches the count
+  sends, saying `(N within S s)`, and the cool-down then applies as to any alert. For a fault that
+  is expected now and then and retried by itself, a storage write refused for a moment, which is
+  noise alone and an outage in a crowd. The window is a row of `alert_state` under `burst:<key>`,
+  pruned with the cool-downs. A count or seconds that is not a whole number above zero throws as
+  the Worker loads. The type `Burst` is exported.
+
 ## 0.7.0 - 2026-10-18
 
 The wire is as it was: `schemaVersion` is 1 on both sides, the pipe is that of 0.6.0 and no

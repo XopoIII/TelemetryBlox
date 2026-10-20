@@ -28,7 +28,7 @@ import { type Env, type Resolved, type SeenEvent, type WorkerConfig } from "./co
 export type { Alert, BatchMeta } from "./alerts.js";
 export type { Announcement } from "./announce.js";
 export { ANNOUNCE_TEXT, ANNOUNCE_TITLE } from "./announce.js";
-export type { AlertRule, BindingNames, ChannelNames, DigestConfig, DigestDay, Env, Marks, Resolved, RobloxKind, ScanRule, SeenEvent, Severity, WorkerConfig, } from "./config.js";
+export type { AlertRule, BindingNames, Burst, ChannelNames, DigestConfig, DigestDay, Env, Marks, Resolved, RobloxKind, ScanRule, SeenEvent, Severity, WorkerConfig, } from "./config.js";
 export { DEFAULTS, field, MAX_SCAN_RULES, short, who } from "./config.js";
 export { SCHEMA_VERSION } from "./ingest.js";
 export { robloxAlertText, robloxKind } from "./roblox.js";

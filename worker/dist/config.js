@@ -91,7 +91,18 @@ function rule(name, given, cooldown, cut, channels) {
             ((event, actor) => `${name}: ${short(event.ctx, 160, cut)}${event.actor ? `, player ${actor}` : ""}`),
         cooldown: seconds(from.cooldownSeconds, cooldown[from.severity], `alerts.${name}.cooldownSeconds`),
         channel: from.channel,
+        ...(from.burst === undefined ? {} : { burst: burst(from.burst, `alerts.${name}.burst`) }),
     };
+}
+function burst(given, name) {
+    if (typeof given !== "object" || given === null)
+        fail(`\`${name}\` must be { count, seconds }`);
+    const whole = (value) => typeof value === "number" && Number.isInteger(value) && value > 0;
+    if (!whole(given.count))
+        fail(`\`${name}.count\` must be a whole number above zero`);
+    if (!whole(given.seconds))
+        fail(`\`${name}.seconds\` must be a whole number of seconds above zero`);
+    return { count: given.count, seconds: given.seconds };
 }
 /** Checks a game's config and fills the defaults. Throws on the first thing that is wrong. */
 export function resolve(config) {

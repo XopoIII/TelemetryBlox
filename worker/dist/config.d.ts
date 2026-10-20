@@ -30,6 +30,18 @@ export interface AlertRule {
     cooldownSeconds?: number;
     /** The channel of `channels` this alert is sent to. Absent: the chat. */
     channel?: string;
+    /**
+     * Sent only once `count` rows of its kind have come within `seconds`, from every server
+     * together: a fault that is expected now and then and retried by itself is worth a message only
+     * when it comes in a crowd. The message goes once a window, as its count is reached, and then
+     * through the cool-down as any other. Absent: every row may send.
+     */
+    burst?: Burst;
+}
+/** How many rows of a kind, inside how many seconds, make an alert of a `burst` rule. */
+export interface Burst {
+    count: number;
+    seconds: number;
 }
 /**
  * Another chat of the game's, by what its two secrets are called: a bot's token and a chat's id.
@@ -176,6 +188,7 @@ export interface ResolvedRule {
     text: (event: SeenEvent, who: string) => string;
     cooldown: number;
     channel?: string;
+    burst?: Burst;
 }
 export interface Resolved {
     game: string;

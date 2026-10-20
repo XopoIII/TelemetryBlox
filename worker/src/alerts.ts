@@ -6,13 +6,14 @@
  * are a developer's own doing.
  *
  * Quiet by rule. Each kind of alert has a cool-down; a repeat inside it is held and counted, and the
- * next one past it says how many were held. A batch sends a handful at most.
+ * next one past it says how many were held. A kind with a burst is sent only once enough of its rows
+ * came inside its window. A batch sends a handful at most.
  *
  * Nothing here may break the ingest: every path catches, and a batch is stored before an alert is
  * thought about. The free plan again: an alert costs one D1 query and one row written.
  */
 
-import { database, type Env, type Resolved, type SeenEvent, type Severity, secret, who } from "./config.js";
+import { type Burst, database, type Env, type Resolved, type SeenEvent, type Severity, secret, who } from "./config.js";
 
 export interface Alert {
 	/** What a repeat is counted by: the same key inside its cool-down is held, not sent. */
@@ -23,6 +24,10 @@ export interface Alert {
 	cooldown: number;
 	/** The channel it is sent to. Absent: the chat. */
 	channel?: string;
+	/** Sent only once this many rows came inside its window (`AlertRule.burst`). */
+	burst?: Burst;
+	/** How many rows of the batch stand behind it: what a burst counts. 1 when left out. */
+	rows?: number;
 }
 
 export interface BatchMeta {
@@ -58,6 +63,7 @@ export function alertsFor(config: Resolved, events: SeenEvent[], meta: BatchMeta
 				text: rule.text(event, actor),
 				cooldown: rule.cooldown,
 				...(rule.channel === undefined ? {} : { channel: rule.channel }),
+				...(rule.burst === undefined ? {} : { burst: rule.burst }),
 			};
 		} catch (error) {
 			// A game's rule that throws on a row it did not expect costs that alert, not the batch.
@@ -72,6 +78,7 @@ export function alertsFor(config: Resolved, events: SeenEvent[], meta: BatchMeta
 		[...byKey.values()].map(({ alert, n }) => ({
 			...alert,
 			text: `${alert.text}${n > 1 ? ` (x${n})` : ""} [v${meta.placeVersion ?? "?"}]`,
+			...(alert.burst === undefined ? {} : { rows: n }),
 		})),
 	);
 }
@@ -98,6 +105,31 @@ async function gate(config: Resolved, env: Env, alert: Alert, now: number): Prom
 	// A key that was sent has nothing held; one that was held has at least this one. Its time cannot
 	// tell them apart: a repeat in the same second carries the same `sent_at` as the one that went.
 	return row && row.held === 0 ? row.released : null;
+}
+
+/**
+ * A burst's window, kept in `alert_state` beside the cool-downs under its own key: `sent_at` is
+ * when the window began and `held` how many rows came in it; `released` hands back what it held
+ * before this batch. A window past its seconds starts again with this batch's rows. One statement,
+ * and every right-hand side reads the row as it was.
+ */
+const BURST_SQL = `INSERT INTO alert_state (key, sent_at, held, released) VALUES (?1, ?2, ?3, 0)
+	ON CONFLICT(key) DO UPDATE SET
+		released = CASE WHEN ?2 - sent_at < ?4 THEN held ELSE 0 END,
+		held     = CASE WHEN ?2 - sent_at < ?4 THEN held + ?3 ELSE ?3 END,
+		sent_at  = CASE WHEN ?2 - sent_at < ?4 THEN sent_at ELSE ?2 END
+	RETURNING held, released`;
+
+/**
+ * How many rows the window holds when this batch's take it to the burst's count, so the alert may
+ * go on; null below the count, and past it, so a window sends once.
+ */
+async function burstGate(config: Resolved, env: Env, alert: Alert, burst: Burst, now: number): Promise<number | null> {
+	const row = await database(env, config)
+		.prepare(BURST_SQL)
+		.bind(`burst:${alert.key}`, now, Math.max(1, alert.rows ?? 1), burst.seconds)
+		.first<{ held: number; released: number }>();
+	return row && row.released < burst.count && row.held >= burst.count ? row.held : null;
 }
 
 /**
@@ -158,10 +190,16 @@ export async function deliver(
 	let sent = 0;
 	try {
 		for (const alert of alerts.slice(0, config.maxAlerts)) {
+			let crowd = "";
+			if (alert.burst) {
+				const seen = await burstGate(config, env, alert, alert.burst, now);
+				if (seen === null) continue;
+				crowd = ` (${seen} within ${alert.burst.seconds} s)`;
+			}
 			const released = await gate(config, env, alert, now);
 			if (released === null) continue;
 			const held = released > 0 ? ` (+${released} held since the last)` : "";
-			const said = `${config.marks[alert.severity]} ${config.game}: ${alert.text}${held}`;
+			const said = `${config.marks[alert.severity]} ${config.game}: ${alert.text}${crowd}${held}`;
 			if (await send(config, env, said, alert.channel)) sent++;
 		}
 	} catch (error) {
@@ -175,7 +213,8 @@ export async function deliver(
 	return sent;
 }
 
-/** Old cool-down rows, dropped nightly: a key not sent for `alertStateDays` starts over. */
+/** Old cool-down rows, dropped nightly: a key not sent for `alertStateDays` starts over, and so does
+ * a burst whose window began that long ago. */
 export async function pruneAlertState(config: Resolved, env: Env): Promise<void> {
 	await database(env, config)
 		.prepare(`DELETE FROM alert_state WHERE sent_at < unixepoch('now', ?1)`)

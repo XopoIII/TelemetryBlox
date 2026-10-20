@@ -33,6 +33,19 @@ export interface AlertRule {
 	cooldownSeconds?: number;
 	/** The channel of `channels` this alert is sent to. Absent: the chat. */
 	channel?: string;
+	/**
+	 * Sent only once `count` rows of its kind have come within `seconds`, from every server
+	 * together: a fault that is expected now and then and retried by itself is worth a message only
+	 * when it comes in a crowd. The message goes once a window, as its count is reached, and then
+	 * through the cool-down as any other. Absent: every row may send.
+	 */
+	burst?: Burst;
+}
+
+/** How many rows of a kind, inside how many seconds, make an alert of a `burst` rule. */
+export interface Burst {
+	count: number;
+	seconds: number;
 }
 
 /**
@@ -188,6 +201,7 @@ export interface ResolvedRule {
 	text: (event: SeenEvent, who: string) => string;
 	cooldown: number;
 	channel?: string;
+	burst?: Burst;
 }
 
 export interface Resolved {
@@ -314,7 +328,16 @@ function rule(
 			((event, actor) => `${name}: ${short(event.ctx, 160, cut)}${event.actor ? `, player ${actor}` : ""}`),
 		cooldown: seconds(from.cooldownSeconds, cooldown[from.severity], `alerts.${name}.cooldownSeconds`),
 		channel: from.channel,
+		...(from.burst === undefined ? {} : { burst: burst(from.burst, `alerts.${name}.burst`) }),
 	};
+}
+
+function burst(given: Burst, name: string): Burst {
+	if (typeof given !== "object" || given === null) fail(`\`${name}\` must be { count, seconds }`);
+	const whole = (value: unknown) => typeof value === "number" && Number.isInteger(value) && value > 0;
+	if (!whole(given.count)) fail(`\`${name}.count\` must be a whole number above zero`);
+	if (!whole(given.seconds)) fail(`\`${name}.seconds\` must be a whole number of seconds above zero`);
+	return { count: given.count, seconds: given.seconds };
 }
 
 /** Checks a game's config and fills the defaults. Throws on the first thing that is wrong. */

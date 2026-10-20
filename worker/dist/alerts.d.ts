@@ -6,12 +6,13 @@
  * are a developer's own doing.
  *
  * Quiet by rule. Each kind of alert has a cool-down; a repeat inside it is held and counted, and the
- * next one past it says how many were held. A batch sends a handful at most.
+ * next one past it says how many were held. A kind with a burst is sent only once enough of its rows
+ * came inside its window. A batch sends a handful at most.
  *
  * Nothing here may break the ingest: every path catches, and a batch is stored before an alert is
  * thought about. The free plan again: an alert costs one D1 query and one row written.
  */
-import { type Env, type Resolved, type SeenEvent, type Severity } from "./config.js";
+import { type Burst, type Env, type Resolved, type SeenEvent, type Severity } from "./config.js";
 export interface Alert {
     /** What a repeat is counted by: the same key inside its cool-down is held, not sent. */
     key: string;
@@ -21,6 +22,10 @@ export interface Alert {
     cooldown: number;
     /** The channel it is sent to. Absent: the chat. */
     channel?: string;
+    /** Sent only once this many rows came inside its window (`AlertRule.burst`). */
+    burst?: Burst;
+    /** How many rows of the batch stand behind it: what a burst counts. 1 when left out. */
+    rows?: number;
 }
 export interface BatchMeta {
     env: string;
@@ -43,5 +48,6 @@ export declare function alertsFor(config: Resolved, events: SeenEvent[], meta: B
 export declare function send(config: Resolved, env: Env, message: string, channel?: string): Promise<boolean>;
 /** Sends the alerts their cool-downs allow, `maxAlerts` of them at most. Returns how many went. */
 export declare function deliver(config: Resolved, env: Env, alerts: Alert[], now?: number): Promise<number>;
-/** Old cool-down rows, dropped nightly: a key not sent for `alertStateDays` starts over. */
+/** Old cool-down rows, dropped nightly: a key not sent for `alertStateDays` starts over, and so does
+ * a burst whose window began that long ago. */
 export declare function pruneAlertState(config: Resolved, env: Env): Promise<void>;
