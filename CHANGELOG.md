@@ -4,6 +4,18 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.8.2 - 2026-10-25
+
+The pipe and the Worker are those of 0.8.1: `src/` and `worker/dist` do not change, the wire is as it
+was (`schemaVersion` 1) and no migration is added. A game that moves to it changes a version number
+and a tag, and need not deploy for it.
+
+### Changed
+
+- **The specs run on LuneBlox 0.11.2**, from 0.11.1. It sets the fast flags of the Roblox client
+  0.744, which turned `DebugCodegenOptSize` off, and its macOS binaries are built with Clang 21.
+  Every other tool, CI action and npm package was already at its latest release.
+
 ## 0.8.1 - 2026-10-25
 
 The pipe and the Worker are those of 0.8.0: `src/` and `worker/dist` do not change, the wire is as it

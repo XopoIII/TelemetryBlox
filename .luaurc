@@ -6,7 +6,7 @@
   "lintErrors": true,
   "typeErrors": true,
   "aliases": {
-    "lune": "~/.luneblox/.typedefs/0.11.1/",
+    "lune": "~/.luneblox/.typedefs/0.11.2/",
     "telemetryblox": "./src",
     "fakes": "./tests/fakes"
   }
