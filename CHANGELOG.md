@@ -4,6 +4,25 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.8.1 - 2026-10-25
+
+The pipe and the Worker are those of 0.8.0: `src/` and `worker/dist` do not change, the wire is as it
+was (`schemaVersion` 1) and no migration is added. A game that moves to it changes a version number
+and a tag, and need not deploy for it.
+
+### Changed
+
+- **The toolchain is at its latest releases**: LuneBlox 0.11.1, StyLua 2.6.0 and lefthook 2.2.2
+  for the pipe; Biome 2.6.3 and `@cloudflare/workers-types` 5.20261025.1 for the Worker. StyLua and
+  Biome change no file; `biome.json` names the 2.6.3 schema.
+
+### Fixed
+
+- **miniflare's undici is held at 7.30.1**, past three advisories `npm audit` found in 7.0.0 to
+  7.30.0: an unbounded EventSource parser (GHSA-4qv8-2p9j-2685), a Subresource Integrity bypass
+  (GHSA-f72v-6w45-q472) and an unhandled error on excessive content-encodings (GHSA-xjj6-f33q-929c).
+  miniflare is a tool of this repository's tests; it is not part of the Worker a game deploys.
+
 ## 0.8.0 - 2026-10-20
 
 The wire is as it was: `schemaVersion` is 1 on both sides and no migration is added. A game that
