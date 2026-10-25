@@ -1,6 +1,6 @@
 {
 	"name": "telemetryblox",
-	"version": "0.8.0",
+	"version": "0.8.1",
 	"description": "The Worker half of TelemetryBlox: the ingest for a Roblox game's telemetry batches and the Telegram sender of its alerts, deployed by each game as a project of its own",
 	"private": true,
 	"license": "MIT",
@@ -36,14 +36,14 @@
 		"check": "sh scripts/check-worker.sh"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.5.15",
-		"@cloudflare/workers-types": "5.20261013.1",
+		"@biomejs/biome": "2.6.3",
+		"@cloudflare/workers-types": "5.20261025.1",
 		"miniflare": "4.20260730.0",
 		"typescript": "7.0.2"
 	},
 	"overrides": {
 		"sharp": "0.35.5",
-		"undici": "7.30.0"
+		"undici": "7.30.1"
 	},
 	"allowScripts": {
 		"workerd@1.20260730.1": true
