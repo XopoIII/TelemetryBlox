@@ -4,6 +4,18 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.8.3 - 2026-10-27
+
+The pipe and the Worker are those of 0.8.2: `src/` and `worker/dist` do not change, the wire is as it
+was (`schemaVersion` 1) and no migration is added. A game that moves to it changes a version number
+and a tag, and need not deploy for it.
+
+### Changed
+
+- **The specs run on LuneBlox 0.11.3**, from 0.11.2. The update brings compression security fixes,
+  reverse Roblox property migrations and optional OCALE conformance tooling. The `@lune` alias follows
+  it.
+
 ## 0.8.2 - 2026-10-25
 
 The pipe and the Worker are those of 0.8.1: `src/` and `worker/dist` do not change, the wire is as it
