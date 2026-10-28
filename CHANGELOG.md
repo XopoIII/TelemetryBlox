@@ -4,6 +4,29 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.8.4 - 2026-10-28
+
+The pipe is that of 0.8.3: `src/` does not change, the wire is as it was (`schemaVersion` 1) and no
+migration is added. The Worker changes: a game that moves to it deploys its Worker.
+
+### Fixed
+
+- **The nightly job reads each event about twice, not some eight times.** Its three statements each
+  expanded every event (one row read an event) of the batches received since the day before the
+  last day rolled up, so about three days of events three times a night; on a growing game that
+  spent D1's free plan's five million rows a day by itself, and past it D1 refused the ingest's
+  inserts, so the servers' batches were dropped until midnight UTC. Now who was first seen
+  (`actors`) reads the batches after a cursor (`alert_cursor` row `actors`), moved once its insert
+  has gone through, and the roll-up reads the days after the last one rolled up, per event and as a
+  whole from one expansion (`WITH ... AS MATERIALIZED`). On workerd's D1, 20,000 events a day: the
+  roll-up 46,100 rows read against 200,600. A batch of a settled day that arrives after its night
+  is no longer counted into it. With no cursor yet, `actors` reads the old window once.
+
+### Added
+
+- **`nightlyReadWarn`** (2,000,000 by default): the nightly report gives `rowsRead`, the rows its big
+  statements read as D1 reports them, and a night past the option sends a warning.
+
 ## 0.8.3 - 2026-10-27
 
 The pipe and the Worker are those of 0.8.2: `src/` and `worker/dist` do not change, the wire is as it
