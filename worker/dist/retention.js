@@ -10,6 +10,7 @@
  * Deletes are rows written too, and every statement is one of the 50 queries an invocation may
  * make on the free plan, so both loops are bounded by QUERY_BUDGET.
  */
+import { send } from "./alerts.js";
 import { database } from "./config.js";
 /**
  * Batches per delete. A batch holds up to 1000 events, so a chunk can free a lot: at 2000 a night's
@@ -18,45 +19,39 @@ import { database } from "./config.js";
 export const PRUNE_CHUNK = 2000;
 /** Queries this job may spend; the free plan allows 50 an invocation, and the rest are overhead. */
 export const QUERY_BUDGET = 40;
+const DAY_SECONDS = 86_400;
+/** How far before its day a day's batch may be received: a server's clock running ahead. */
+const CLOCK_SLACK_SECONDS = 3600;
+/** A `YYYY-MM-DD` day's midnight, UTC, in seconds. */
+function unixDay(day) {
+    return Date.parse(`${day}T00:00:00Z`) / 1000;
+}
 export async function retention(config, env) {
     const db = database(env, config);
     let queries = 0;
-    // 1. Roll up finished days not settled yet. The floor is the last day already rolled up (redone,
-    //    since it may have been partial); batches are narrowed by `received_at` BEFORE json_each
-    //    expands them, so the job reads only the last few days, not the whole history.
+    // Each event a statement expands through json_each is a row read, and D1's free plan reads five
+    // million a day; past it D1 refuses the ingest too. So every event is expanded about twice a
+    // night: once for who was first seen, once for the day's roll-up.
+    let rowsRead = 0;
+    const read = (res) => {
+        rowsRead += res.meta?.rows_read ?? 0;
+    };
+    // 1. Who was first seen when, kept BEFORE the prune can take the rows that say so. The bare
+    //    `place_version` beside MIN(t) is that oldest row's own (SQLite's rule for a lone MIN). A
+    //    player already kept is ignored, so each costs one row written, once. The batches are those
+    //    after the cursor, moved only once the insert has gone through, so a night that fails is read
+    //    again the next. With no cursor yet (a new database, or one from before it), the window of
+    //    the roll-up below and the day before it.
     const lastRolled = await db.prepare(`SELECT MAX(day) AS day FROM events_daily`).first();
     queries++;
-    const floorDay = lastRolled?.day ?? "1970-01-01";
-    const rolled = await db
-        .prepare(`INSERT OR REPLACE INTO events_daily (day, event, env, universe_id, events, actors)
-			 SELECT date(json_extract(e.value,'$.t'),'unixepoch') AS day,
-			        json_extract(e.value,'$.event') AS event, b.env, b.universe_id,
-			        COUNT(*) AS events, COUNT(DISTINCT json_extract(e.value,'$.actor')) AS actors
-			 FROM batches b, json_each(b.events) e
-			 WHERE b.received_at >= unixepoch(?1, '-1 day')
-			   AND json_extract(e.value,'$.t') >= unixepoch(?1)
-			   AND json_extract(e.value,'$.t') < unixepoch(date('now'))
-			 GROUP BY day, event, b.env, b.universe_id`)
-        .bind(floorDay)
-        .run();
+    const floorDay = lastRolled?.day ?? null;
+    const cursor = await db
+        .prepare(`SELECT batch_id FROM alert_cursor WHERE name = 'actors'`)
+        .first();
     queries++;
-    // The whole day under event '*': the distinct actors across every event are the day's players,
-    // which no sum over the per-event rows gives.
-    await db
-        .prepare(`INSERT OR REPLACE INTO events_daily (day, event, env, universe_id, events, actors)
-			 SELECT date(json_extract(e.value,'$.t'),'unixepoch') AS day, '*', b.env, b.universe_id,
-			        COUNT(*) AS events, COUNT(DISTINCT json_extract(e.value,'$.actor')) AS actors
-			 FROM batches b, json_each(b.events) e
-			 WHERE b.received_at >= unixepoch(?1, '-1 day')
-			   AND json_extract(e.value,'$.t') >= unixepoch(?1)
-			   AND json_extract(e.value,'$.t') < unixepoch(date('now'))
-			 GROUP BY day, b.env, b.universe_id`)
-        .bind(floorDay)
-        .run();
+    const newest = await db.prepare(`SELECT COALESCE(MAX(id), 0) AS id FROM batches`).first();
     queries++;
-    // Who was first seen when, kept BEFORE the prune can take the rows that say so. The bare
-    // `place_version` beside MIN(t) is that oldest row's own (SQLite's rule for a lone MIN). A
-    // player already kept is ignored, so each costs one row written, once.
+    const to = newest?.id ?? 0;
     const firsts = await db
         .prepare(`INSERT OR IGNORE INTO actors (actor, env, universe_id, first_seen, first_version)
 			 SELECT actor, env, universe_id, MIN(t), place_version
@@ -64,13 +59,42 @@ export async function retention(config, env) {
 			   SELECT json_extract(e.value,'$.actor') AS actor, b.env AS env, b.universe_id AS universe_id,
 			          json_extract(e.value,'$.t') AS t, b.place_version AS place_version
 			   FROM batches b, json_each(b.events) e
-			   WHERE b.received_at >= unixepoch(?1, '-1 day')
+			   WHERE b.id > ?1 AND b.id <= ?2 AND b.received_at >= ?3
 			 )
 			 WHERE actor IS NOT NULL
 			 GROUP BY actor, env, universe_id`)
-        .bind(floorDay)
+        .bind(cursor?.batch_id ?? 0, to, cursor ? 0 : floorDay ? unixDay(floorDay) - DAY_SECONDS : 0)
         .run();
     queries++;
+    read(firsts);
+    await db.prepare(`INSERT OR REPLACE INTO alert_cursor (name, batch_id) VALUES ('actors', ?1)`).bind(to).run();
+    queries++;
+    // 2. Roll up the finished days after the last one rolled up, per event and as a whole, from one
+    //    expansion: the events grouped by player first, then summed per event and, under event '*',
+    //    across them, since the distinct players of the whole day are what no sum over the per-event
+    //    rows gives. Batches are narrowed by `received_at` BEFORE json_each expands them, from an hour
+    //    before the first day (servers' clocks), with no upper end: a day's last batches arrive after
+    //    its midnight. A batch of a settled day that arrives after its night is not counted in it.
+    const firstDay = floorDay ? unixDay(floorDay) + DAY_SECONDS : 0;
+    const rolled = await db
+        .prepare(`WITH x AS MATERIALIZED (
+			   SELECT date(json_extract(e.value,'$.t'),'unixepoch') AS day,
+			          json_extract(e.value,'$.event') AS event, b.env AS env, b.universe_id AS universe_id,
+			          json_extract(e.value,'$.actor') AS actor, COUNT(*) AS n
+			   FROM batches b, json_each(b.events) e
+			   WHERE b.received_at >= ?1 - ${CLOCK_SLACK_SECONDS}
+			     AND json_extract(e.value,'$.t') >= ?1
+			     AND json_extract(e.value,'$.t') < unixepoch(date('now'))
+			   GROUP BY day, event, env, universe_id, actor
+			 )
+			 INSERT OR REPLACE INTO events_daily (day, event, env, universe_id, events, actors)
+			 SELECT day, event, env, universe_id, SUM(n), COUNT(actor) FROM x GROUP BY day, event, env, universe_id
+			 UNION ALL
+			 SELECT day, '*', env, universe_id, SUM(n), COUNT(DISTINCT actor) FROM x GROUP BY day, env, universe_id`)
+        .bind(firstDay)
+        .run();
+    queries++;
+    read(rolled);
     // 2. Past the age window, oldest first, in chunks.
     let deleted = 0;
     while (queries < QUERY_BUDGET) {
@@ -81,6 +105,7 @@ export async function retention(config, env) {
             .bind(`-${config.retentionDays} days`, PRUNE_CHUNK)
             .run();
         queries++;
+        read(res);
         const n = res.meta?.changes ?? 0;
         deleted += n;
         if (n < PRUNE_CHUNK)
@@ -110,7 +135,7 @@ export async function retention(config, env) {
     const report = {
         message: "retention",
         rolledUp: rolled.meta?.changes ?? 0,
-        rolledFrom: floorDay,
+        rolledFrom: firstDay ? new Date(firstDay * 1000).toISOString().slice(0, 10) : "1970-01-01",
         newActors: firsts.meta?.changes ?? 0,
         deletedBatches: deleted,
         overBudgetBatches: overBudget,
@@ -118,10 +143,16 @@ export async function retention(config, env) {
         // Counted after the age prune, so only the size prune is still to come off.
         rawBatches: (counted?.batches ?? 0) - overBudget,
         queries,
+        // The rows of D1 the job's big statements read, as D1 reports them.
+        rowsRead,
         // Out of queries with events still over budget: the ingest rate has outgrown the plan.
         warn: rawEvents > config.maxRawEvents ? "still over maxRawEvents after the query budget" : undefined,
     };
     console.log(JSON.stringify(report));
+    // The read budget is the one wall a growing game meets with no warning: said the night it nears.
+    if (rowsRead > config.nightlyReadWarn) {
+        await send(config, env, `${config.marks.warning} ${config.game}: the nightly job read ${rowsRead} rows of D1 (warned past ${config.nightlyReadWarn})`);
+    }
     return report;
 }
 /**
