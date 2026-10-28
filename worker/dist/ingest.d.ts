@@ -18,6 +18,8 @@ import { type Env, type Resolved } from "./config.js";
  * old game server keeps working against an updated Worker.
  */
 export declare const SCHEMA_VERSION = 1;
+/** Whether a D1 error is the database at its size limit (SQLite's SQLITE_FULL, D1's own words). */
+export declare function storageFull(error: unknown): boolean;
 export declare function json(body: unknown, status?: number): Response;
 /**
  * Whether two secrets are the same, in constant time. A plain `===` leaks the key one byte at a time

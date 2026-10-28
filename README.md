@@ -331,7 +331,7 @@ migrations, the example queries and the testing helpers ride in the same package
 | `digest` | the events of `alerts` | `{ events, text }`, or `false` for no digest |
 | `retentionDays` | 60 | Days raw batches are kept |
 | `alertStateDays` | 7 | Days an alert's cool-down state is kept after it last went |
-| `maxRawEvents` | 2,000,000 | Raw events kept whatever their age (about 300 MB) |
+| `maxRawEvents` | 2,000,000 | Raw events kept once rolled up, whatever their age (about 300 MB). D1 holds this plus the day being collected, and the sum must fit the plan: on the free plan's 500 MB, a game sending more than about a million events a day sets it lower |
 | `nightlyHourUtc` | 3 | The hourly run that is also the nightly one |
 | `nightlyReadWarn` | 2,000,000 | Rows of D1 a night may read before it sends a warning (two fifths of the free plan's day) |
 | `environments` | `live`, `studio`, `test` | What a batch may call its server. Only `live` alerts |
@@ -378,7 +378,11 @@ the chat. A channel either of whose secrets is not set sends to the chat and wri
 secrets are put and no message is lost in between. A rule that names a channel `channels` does not
 hold is a wrong config, and throws as the Worker loads.
 
-**Every hour** the scan reads the live batches since its last run and says who stood at a limit.
+**Every hour** the scan reads the live batches since its last run and says who stood at a limit,
+and the size wall takes the batches past `maxRawEvents` that the night has rolled up: never the day
+being collected, nor a batch `actors` has not read. When those alone are over the budget, the night
+says so as a warning, since past the plan's size D1 refuses the ingest: that insert answers 507
+`storage_full`, any other fault 500.
 **Every night** the job rolls each finished day up into `events_daily`, keeps who was first seen when
 (`actors`), prunes raw batches past `retentionDays` or `maxRawEvents`, and sends yesterday in one
 message. It expands each event about twice: `actors` reads the batches after its cursor, and the

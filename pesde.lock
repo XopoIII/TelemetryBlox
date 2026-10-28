@@ -2,5 +2,5 @@
 # It is not intended for manual editing.
 format = 2
 name = "xopoiii/telemetryblox"
-version = "0.8.4"
+version = "0.8.5"
 target = "roblox_server"

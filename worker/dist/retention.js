@@ -4,8 +4,13 @@
  *
  * Two walls, whichever comes first: age (`retentionDays`) and size (`maxRawEvents`). The size wall
  * is counted in events, not bytes, because D1 will not report its page count to a Worker. An event
- * is about 150 bytes of JSON, so the default of two million is roughly 300 MB, inside the free
- * plan's 500 MB.
+ * takes some 150 to 160 bytes of D1's pages, so the default of two million is roughly 300 MB.
+ *
+ * The size wall runs every hour as well as at night, and takes only batches every job is done
+ * with: at or before the `actors` cursor, and received before the first day still to roll up. So
+ * what D1 holds is `maxRawEvents` plus the day being collected, and that sum, not the option alone,
+ * must fit the plan: on the free plan's 500 MB a day of more than about two million events leaves
+ * no room, and the wall says so rather than take rows no roll-up has counted.
  *
  * Deletes are rows written too, and every statement is one of the 50 queries an invocation may
  * make on the free plan, so both loops are bounded by QUERY_BUDGET.
@@ -111,49 +116,100 @@ export async function retention(config, env) {
         if (n < PRUNE_CHUNK)
             break;
     }
-    // 3. Past the size budget, oldest first. `id` is arrival order, which server clocks are not.
-    const counted = await db
-        .prepare(`SELECT COALESCE(SUM(n), 0) AS events, COUNT(*) AS batches FROM batches`)
-        .first();
-    queries++;
-    let rawEvents = counted?.events ?? 0;
-    let overBudget = 0;
-    while (rawEvents > config.maxRawEvents && queries < QUERY_BUDGET) {
-        const res = await db
-            .prepare(`DELETE FROM batches WHERE id IN (SELECT id FROM batches ORDER BY id LIMIT ?1) RETURNING n`)
-            .bind(PRUNE_CHUNK)
-            .all();
-        queries++;
-        const rows = res.results ?? [];
-        if (rows.length === 0)
-            break;
-        overBudget += rows.length;
-        for (const row of rows)
-            rawEvents -= row.n;
-    }
-    deleted += overBudget;
+    // 3. Past the size budget.
+    const wall = await sizeWall(config, db, queries);
+    queries = wall.queries;
+    deleted += wall.overBudgetBatches;
     const report = {
         message: "retention",
         rolledUp: rolled.meta?.changes ?? 0,
         rolledFrom: firstDay ? new Date(firstDay * 1000).toISOString().slice(0, 10) : "1970-01-01",
         newActors: firsts.meta?.changes ?? 0,
         deletedBatches: deleted,
-        overBudgetBatches: overBudget,
-        rawEvents,
+        overBudgetBatches: wall.overBudgetBatches,
+        rawEvents: wall.rawEvents,
         // Counted after the age prune, so only the size prune is still to come off.
-        rawBatches: (counted?.batches ?? 0) - overBudget,
+        rawBatches: wall.rawBatches,
         queries,
         // The rows of D1 the job's big statements read, as D1 reports them.
         rowsRead,
-        // Out of queries with events still over budget: the ingest rate has outgrown the plan.
-        warn: rawEvents > config.maxRawEvents ? "still over maxRawEvents after the query budget" : undefined,
+        warn: wall.warn,
     };
     console.log(JSON.stringify(report));
     // The read budget is the one wall a growing game meets with no warning: said the night it nears.
     if (rowsRead > config.nightlyReadWarn) {
         await send(config, env, `${config.marks.warning} ${config.game}: the nightly job read ${rowsRead} rows of D1 (warned past ${config.nightlyReadWarn})`);
     }
+    // And the size wall, once a night: past it D1 refuses the ingest.
+    if (wall.warn) {
+        await send(config, env, `${config.marks.warning} ${config.game}: ${wall.rawEvents} raw events left after the size wall, over maxRawEvents ${config.maxRawEvents} (${wall.warn})`);
+    }
     return report;
+}
+/**
+ * Past `maxRawEvents`, the oldest batches go in chunks, `id` (arrival) order, which server clocks
+ * are not. Only batches every job is done with: at or before the `actors` cursor (who was first
+ * seen has read them) and received before the first day still to roll up, less the servers' clock
+ * slack (the roll-up has counted them). With no day rolled up yet nothing is old enough.
+ */
+async function sizeWall(config, db, used) {
+    let queries = used;
+    const counted = await db
+        .prepare(`SELECT COALESCE(SUM(n), 0) AS events, COUNT(*) AS batches FROM batches`)
+        .first();
+    queries++;
+    let rawEvents = counted?.events ?? 0;
+    let rawBatches = counted?.batches ?? 0;
+    let overBudgetBatches = 0;
+    if (rawEvents <= config.maxRawEvents) {
+        return { rawEvents, rawBatches, overBudgetBatches, queries, warn: undefined };
+    }
+    const done = await db
+        .prepare(`SELECT (SELECT MAX(day) FROM events_daily) AS day,
+			        (SELECT batch_id FROM alert_cursor WHERE name = 'actors') AS cursor`)
+        .first();
+    queries++;
+    const before = done?.day ? unixDay(done.day) + DAY_SECONDS - CLOCK_SLACK_SECONDS : 0;
+    const through = done?.cursor ?? 0;
+    let exhausted = false;
+    while (rawEvents > config.maxRawEvents && queries < QUERY_BUDGET) {
+        const res = await db
+            .prepare(`DELETE FROM batches WHERE id IN (
+				   SELECT id FROM batches WHERE id <= ?1 AND received_at < ?2 ORDER BY id LIMIT ?3
+				 ) RETURNING n`)
+            .bind(through, before, PRUNE_CHUNK)
+            .all();
+        queries++;
+        const rows = res.results ?? [];
+        overBudgetBatches += rows.length;
+        rawBatches -= rows.length;
+        for (const row of rows)
+            rawEvents -= row.n;
+        if (rows.length < PRUNE_CHUNK) {
+            exhausted = true;
+            break;
+        }
+    }
+    let warn;
+    if (rawEvents > config.maxRawEvents) {
+        // Out of batches it may take: the day being collected is over budget by itself, so the
+        // game must send fewer rows or keep them in a bigger database. Out of queries: next run.
+        warn = exhausted
+            ? "the rows not rolled up yet are over budget by themselves"
+            : "still over maxRawEvents after the query budget";
+    }
+    return { rawEvents, rawBatches, overBudgetBatches, queries, warn };
+}
+/**
+ * The size wall alone, every hour: a day's rows past `maxRawEvents` go before the night, so D1
+ * holds the budget plus the day being collected. When under budget it costs one statement, which
+ * reads a row a stored batch.
+ */
+export async function hourlyWall(config, env) {
+    const wall = await sizeWall(config, database(env, config), 0);
+    if (wall.overBudgetBatches > 0 || wall.warn)
+        console.log(JSON.stringify({ message: "size_wall", ...wall }));
+    return wall;
 }
 /**
  * How fresh the live data is: the newest live batch, its age and the place version it came from.

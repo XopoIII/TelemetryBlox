@@ -4,6 +4,30 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.8.5 - 2026-10-29
+
+The pipe is that of 0.8.4: `src/` does not change, the wire is as it was (`schemaVersion` 1) and no
+migration is added. The Worker changes: a game that moves to it deploys its Worker.
+
+### Fixed
+
+- **The size wall runs every hour, so a day's rows no longer fill D1 before the night.** It ran only
+  in the nightly job, so D1 held `maxRawEvents` plus a whole day of batches; on a growing game that
+  passed the free plan's 500 MB by the afternoon, and D1 refused every insert until space was made
+  by hand. Now each hourly run also takes the batches past the budget, oldest first.
+- **The size wall takes only batches every job is done with.** Before, it took the oldest batches
+  whatever they held, so a low budget could take rows of the day still to roll up, or rows who was
+  first seen had not read. Now it takes a batch only at or before the `actors` cursor and received
+  before the first day still to roll up (less the servers' clock slack). When what is left is over
+  the budget by itself, the report's `warn` says so and the night sends it as a warning.
+
+### Changed
+
+- **A database at its size limit answers 507 `storage_full`** to the ingest, not 500 `insert_failed`,
+  so the server's `send_failed` warning names it (`http 507`). The pipe holds and resends both alike.
+- The sizing note: an event takes some 150 to 160 bytes of D1's pages, and what must fit the plan is
+  `maxRawEvents` plus a day of events, not the option alone.
+
 ## 0.8.4 - 2026-10-28
 
 The pipe is that of 0.8.3: `src/` does not change, the wire is as it was (`schemaVersion` 1) and no

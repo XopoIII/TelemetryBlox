@@ -12,7 +12,8 @@
  *     });
  *
  * One cron trigger, every hour: Cloudflare's free plan allows five an account. Every run is the
- * hourly scan; the run in `nightlyHourUtc` is also the nightly retention and yesterday's digest.
+ * hourly scan; the run in `nightlyHourUtc` is also the nightly retention and yesterday's digest,
+ * and every other run also the size wall alone.
  *
  * The doors:
  *   POST /ingest            a batch, with the ingest key in `x-api-key`
@@ -25,6 +26,7 @@
  */
 import { type Alert, type BatchMeta } from "./alerts.js";
 import { type Env, type Resolved, type SeenEvent, type WorkerConfig } from "./config.js";
+import { type Wall } from "./retention.js";
 export type { Alert, BatchMeta } from "./alerts.js";
 export type { Announcement } from "./announce.js";
 export { ANNOUNCE_TEXT, ANNOUNCE_TITLE } from "./announce.js";
@@ -48,6 +50,8 @@ export interface Kit {
     digest: (env: Env) => Promise<boolean>;
     /** The nightly roll-up and pruning. */
     retention: (env: Env) => Promise<Record<string, unknown>>;
+    /** The size wall alone, as the hourly runs do it. */
+    hourlyWall: (env: Env) => Promise<Wall>;
     /** Whether the run scheduled at `scheduledTime` (ms) is the nightly one. */
     isNightly: (scheduledTime: number) => boolean;
     /** What a Roblox webhook's body says, as a message. */

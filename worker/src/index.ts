@@ -12,7 +12,8 @@
  *     });
  *
  * One cron trigger, every hour: Cloudflare's free plan allows five an account. Every run is the
- * hourly scan; the run in `nightlyHourUtc` is also the nightly retention and yesterday's digest.
+ * hourly scan; the run in `nightlyHourUtc` is also the nightly retention and yesterday's digest,
+ * and every other run also the size wall alone.
  *
  * The doors:
  *   POST /ingest            a batch, with the ingest key in `x-api-key`
@@ -28,7 +29,7 @@ import { type Alert, alertsFor, type BatchMeta, deliver, pruneAlertState, send }
 import { announce, announcementOf } from "./announce.js";
 import { type Env, type Resolved, resolve, type SeenEvent, secret, type WorkerConfig } from "./config.js";
 import { asText, authorised, createLimiter, ingest, json, secretsMatch } from "./ingest.js";
-import { freshness, retention } from "./retention.js";
+import { freshness, hourlyWall, retention, type Wall } from "./retention.js";
 import { robloxKind, robloxWebhookText } from "./roblox.js";
 import { anomalies, digest } from "./scan.js";
 
@@ -71,6 +72,8 @@ export interface Kit {
 	digest: (env: Env) => Promise<boolean>;
 	/** The nightly roll-up and pruning. */
 	retention: (env: Env) => Promise<Record<string, unknown>>;
+	/** The size wall alone, as the hourly runs do it. */
+	hourlyWall: (env: Env) => Promise<Wall>;
 	/** Whether the run scheduled at `scheduledTime` (ms) is the nightly one. */
 	isNightly: (scheduledTime: number) => boolean;
 	/** What a Roblox webhook's body says, as a message. */
@@ -90,6 +93,7 @@ export function createKit(given: WorkerConfig): Kit {
 		anomalies: (env) => anomalies(config, env),
 		digest: (env) => digest(config, env),
 		retention: (env) => retention(config, env),
+		hourlyWall: (env) => hourlyWall(config, env),
 		isNightly: (scheduledTime) => new Date(scheduledTime).getUTCHours() === config.nightlyHourUtc,
 		robloxWebhookText: (body) => robloxWebhookText(config, body),
 		robloxWebhookChannel: (body) => config.robloxChannel(robloxKind(body)),
@@ -161,7 +165,8 @@ export function createWorker(given: WorkerConfig): ExportedHandler<Env> {
 		async scheduled(event, env, ctx) {
 			const hourly = kit.anomalies(env).catch(logged("anomalies_failed"));
 			if (!kit.isNightly(event.scheduledTime)) {
-				ctx.waitUntil(hourly);
+				// A day's rows past the budget go before the night, so D1 never holds two days of them.
+				ctx.waitUntil(hourly.then(() => kit.hourlyWall(env)).catch(logged("size_wall_failed")));
 				return;
 			}
 			// The digest reads the roll-up, so it follows the retention that makes it.

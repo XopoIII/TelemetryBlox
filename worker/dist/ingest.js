@@ -23,6 +23,11 @@ const INSERT_SQL = `INSERT OR IGNORE INTO batches
 	(received_at, env, schema_version, universe_id, place_id, place_version, job_id, server_start,
 	 first_seq, last_seq, n, events)
 	VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)`;
+/** Whether a D1 error is the database at its size limit (SQLite's SQLITE_FULL, D1's own words). */
+export function storageFull(error) {
+    const said = error instanceof Error ? error.message : String(error);
+    return /SQLITE_FULL|database or disk is full|maximum (database|db) size|database size limit/i.test(said);
+}
 export function json(body, status = 200) {
     return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -192,7 +197,10 @@ export async function ingest(config, request, env, ctx, limiter) {
             jobId,
             count: events.length,
         }));
-        // 5xx on purpose: the pipe sends the batch again, and the unique index makes that free.
+        // 5xx on purpose: the pipe sends the batch again, and the unique index makes that free. A
+        // database at its size limit answers 507, so the server's own warning names it.
+        if (storageFull(error))
+            return json({ error: "storage_full" }, 507);
         return json({ error: "insert_failed" }, 500);
     }
     if (skipped > 0)
