@@ -142,6 +142,11 @@ export interface WorkerConfig {
     maxRawEvents?: number;
     /** The UTC hour whose run is also the nightly one. 3 by default. */
     nightlyHourUtc?: number;
+    /**
+     * Rows of D1 the nightly job may read before it says so as a warning. 2,000,000 by default, two
+     * fifths of the free plan's five million a day: past that limit D1 refuses the ingest as well.
+     */
+    nightlyReadWarn?: number;
     /** The environments a batch may name. Only "live" alerts. "live", "studio", "test" by default. */
     environments?: string[];
     /** Bytes a body may be. 1,000,000 by default. */
@@ -205,6 +210,7 @@ export interface Resolved {
     alertStateDays: number;
     maxRawEvents: number;
     nightlyHourUtc: number;
+    nightlyReadWarn: number;
     environments: string[];
     maxBodyBytes: number;
     maxEvents: number;
@@ -224,6 +230,7 @@ export declare const DEFAULTS: {
     alertStateDays: number;
     maxRawEvents: number;
     nightlyHourUtc: number;
+    nightlyReadWarn: number;
     environments: string[];
     maxBodyBytes: number;
     maxEvents: number;

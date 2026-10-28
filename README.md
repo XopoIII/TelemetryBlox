@@ -18,9 +18,9 @@ TelemetryBlox is two things in one repository:
 It was built and used inside a live game before it became a package, and holds nothing of any
 game: every event name, endpoint, secret's name, alert rule and threshold is handed in.
 
-> **Status: 0.8.3.** The pipe's rules and Roblox's analytics are proven by 119 specs that run off
+> **Status: 0.8.4.** The pipe's rules and Roblox's analytics are proven by 119 specs that run off
 > Roblox on LuneBlox, and each of 226 small slips in the code makes the suite fail
-> (`tests/Mutate.luau`). The Worker's 96
+> (`tests/Mutate.luau`). The Worker's 100
 > tests run against Node's own SQLite, which D1 is, and a smoke gate serves the built Worker in
 > local `workerd`. **The engine adapter has not run in a Roblox server here:**
 > `src/RobloxServices.luau`, which posts the batches and makes the `AnalyticsService` calls, is
@@ -36,7 +36,7 @@ or pin it exactly in `pesde.toml`:
 
 ```toml
 [dependencies]
-TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.8.3", target = "roblox_server" }
+TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.8.4", target = "roblox_server" }
 ```
 
 It has no dependencies. The experience needs **Allow HTTP Requests** on.
@@ -256,7 +256,7 @@ telemetry/
 		"deploy": "wrangler deploy"
 	},
 	"dependencies": {
-		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.8.3"
+		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.8.4"
 	},
 	"devDependencies": {
 		"wrangler": "4.147.0"
@@ -333,6 +333,7 @@ migrations, the example queries and the testing helpers ride in the same package
 | `alertStateDays` | 7 | Days an alert's cool-down state is kept after it last went |
 | `maxRawEvents` | 2,000,000 | Raw events kept whatever their age (about 300 MB) |
 | `nightlyHourUtc` | 3 | The hourly run that is also the nightly one |
+| `nightlyReadWarn` | 2,000,000 | Rows of D1 a night may read before it sends a warning (two fifths of the free plan's day) |
 | `environments` | `live`, `studio`, `test` | What a batch may call its server. Only `live` alerts |
 | `maxBodyBytes`, `maxEvents` | 1,000,000, 2000 | The bounds on a body |
 | `maxBatchesPerMinute`, `maxServerBatchesPerMinute` | 1,200, 60 | How fast batches may arrive, over every server and from one (by job id). The surplus is refused with a 429, which the pipe holds and posts again without spending a try: a delay for a running server, and a loss only for a closing one still refused when its drain's budget ends. A running server posts once a tick; a closing one posts its backlog back to back, three batches and a few with the pipe's defaults |
@@ -380,7 +381,10 @@ hold is a wrong config, and throws as the Worker loads.
 **Every hour** the scan reads the live batches since its last run and says who stood at a limit.
 **Every night** the job rolls each finished day up into `events_daily`, keeps who was first seen when
 (`actors`), prunes raw batches past `retentionDays` or `maxRawEvents`, and sends yesterday in one
-message.
+message. It expands each event about twice: `actors` reads the batches after its cursor, and the
+roll-up the days after the last one rolled up, per event and as a whole from one expansion. Each
+event expanded is a row read, and past D1's free plan's five million a day D1 refuses the ingest
+too, so a night that reads more than `nightlyReadWarn` says so as a warning.
 
 ## Setting a game up
 
