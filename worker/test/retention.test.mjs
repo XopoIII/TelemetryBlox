@@ -118,3 +118,95 @@ test("a night expands the batches twice, and warns past nightlyReadWarn", async 
 	await call(loud, "/retention", { handler });
 	assert.deepEqual(texts(), ["[warning] Example Game: the nightly job read 2000 rows of D1 (warned past 1500)"]);
 });
+
+/** The Worker's cron handler at `hour` UTC, waited for. */
+async function cron(env, hour, handler) {
+	const waited = [];
+	await handler.scheduled({ scheduledTime: Date.UTC(2026, 9, 4, hour, 17) }, env, {
+		waitUntil: (p) => waited.push(p),
+	});
+	await Promise.all(waited);
+}
+
+test("past the event budget the oldest batches go once rolled up, whatever their age", async () => {
+	const tiny = createWorker({ ...CONFIG, maxRawEvents: 3 });
+	const env = environment();
+	const yesterday = TODAY - DAY;
+	for (const hour of [6, 7]) {
+		store(env, yesterday + hour * HOUR, [
+			[yesterday + hour * HOUR, "join", "u_a"],
+			[yesterday + hour * HOUR, "feed", "u_a"],
+		]);
+	}
+	const report = (await call(env, "/retention", { handler: tiny })).body;
+	// Four events against three: yesterday is rolled up first, then its batches go, here both.
+	assert.equal(report.overBudgetBatches, 2);
+	assert.equal(report.rawEvents, 0);
+	assert.equal(report.warn, undefined);
+	assert.equal(rows(env, "SELECT events FROM events_daily WHERE event = '*'")[0].events, 4);
+	// The default budget leaves four events alone.
+	const kept = environment();
+	store(kept, yesterday + 6 * HOUR, [[yesterday + 6 * HOUR, "join", "u_a"]]);
+	assert.equal((await call(kept, "/retention")).body.overBudgetBatches, 0);
+});
+
+test("the size wall never takes the day being collected, and says so once a night", async () => {
+	const env = environment();
+	const yesterday = TODAY - DAY;
+	store(env, yesterday + 6 * HOUR, [
+		[yesterday + 6 * HOUR, "join", "u_a"],
+		[yesterday + 6 * HOUR, "feed", "u_a"],
+	]);
+	store(env, NOW - HOUR, [
+		[NOW - HOUR, "join", "u_b"],
+		[NOW - HOUR, "feed", "u_b"],
+		[NOW - HOUR, "feed", "u_b"],
+	]);
+	// A budget of three: yesterday's batch goes, today's three events stay, and that is enough.
+	const three = (await call(env, "/retention", { handler: createWorker({ ...CONFIG, maxRawEvents: 3 }) })).body;
+	assert.equal(three.overBudgetBatches, 1);
+	assert.equal(three.rawEvents, 3);
+	assert.equal(three.warn, undefined);
+	assert.equal(texts().length, 0);
+	// A budget of two: today alone is over it, and nothing of today is taken.
+	const two = (await call(env, "/retention", { handler: createWorker({ ...CONFIG, maxRawEvents: 2 }) })).body;
+	assert.equal(two.overBudgetBatches, 0);
+	assert.equal(two.rawEvents, 3);
+	assert.equal(two.warn, "the rows not rolled up yet are over budget by themselves");
+	assert.deepEqual(texts(), [
+		"[warning] Example Game: 3 raw events left after the size wall, over maxRawEvents 2 (the rows not rolled up yet are over budget by themselves)",
+	]);
+});
+
+test("the size wall leaves a batch who was first seen has not read", async () => {
+	const tiny = createWorker({ ...CONFIG, maxRawEvents: 1 });
+	const env = environment();
+	const yesterday = TODAY - DAY;
+	store(env, yesterday + 6 * HOUR, [
+		[yesterday + 6 * HOUR, "join", "u_a"],
+		[yesterday + 6 * HOUR, "feed", "u_a"],
+	]);
+	await call(env, "/retention", { handler: tiny });
+	assert.equal(rows(env, "SELECT COUNT(*) AS n FROM batches")[0].n, 0);
+	// Received yesterday but stored after the night's cursor: its player is not kept yet.
+	store(env, yesterday + 9 * HOUR, [[yesterday + 9 * HOUR, "join", "u_late"]]);
+	store(env, yesterday + 10 * HOUR, [[yesterday + 10 * HOUR, "join", "u_later"]]);
+	await cron(env, 12, tiny);
+	assert.equal(rows(env, "SELECT COUNT(*) AS n FROM batches")[0].n, 2);
+});
+
+test("an hourly run prunes past the budget what the night has rolled up", async () => {
+	const tiny = createWorker({ ...CONFIG, maxRawEvents: 2 });
+	const env = environment();
+	const yesterday = TODAY - DAY;
+	store(env, yesterday + 6 * HOUR, [[yesterday + 6 * HOUR, "join", "u_a"]]);
+	await call(env, "/retention", { handler: createWorker({ ...CONFIG, maxRawEvents: 100 }) });
+	// After the night, today's rows come in and the budget is passed.
+	store(env, NOW - 2 * HOUR, [[NOW - 2 * HOUR, "join", "u_b"]]);
+	store(env, NOW - HOUR, [[NOW - HOUR, "join", "u_c"]]);
+	// Not the night's hour: the roll-up does not run, the wall does, and takes the rolled-up batch.
+	// The cursor stands at the night's last batch, so today's two stay whatever the budget.
+	await cron(env, 12, tiny);
+	assert.deepEqual(rows(env, "SELECT n FROM batches ORDER BY id"), [{ n: 1 }, { n: 1 }]);
+	assert.equal(rows(env, "SELECT COUNT(*) AS n FROM events_daily WHERE event = '*'")[0].n, 1);
+});

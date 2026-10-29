@@ -281,24 +281,22 @@ test("the days raw rows are kept are the game's to say", async () => {
 	assert.deepEqual((await pruned(year, 61)).left, ["old", "new"]);
 });
 
-test("past the event budget the oldest batches go, whatever their age", async () => {
-	const tiny = createWorker({ game: "example", maxRawEvents: 3 });
-	const env = environment();
-	for (const jobId of ["a", "b"]) {
-		const events = [1, 2].map((seq) => ({ seq, t: YESTERDAY, event: "join", actor: "u_a", ctx: {} }));
-		await call(env, "/ingest", { body: envelope({ jobId }, events) });
-	}
-	const report = (await call(env, "/retention", { handler: tiny })).body;
-	// Four events against a budget of three: one chunk of the oldest batches goes, which here is all.
-	assert.equal(report.overBudgetBatches, 2);
-	assert.equal(report.rawEvents, 0);
-	assert.equal(report.warn, undefined);
-	assert.equal(stored(env), 0);
-	// The default budget leaves four events alone.
-	const kept = environment();
-	await call(kept, "/ingest", { body: one() });
-	assert.equal((await call(kept, "/retention")).body.overBudgetBatches, 0);
-	assert.equal(stored(kept), 1);
+test("a database at its size limit answers 507, and any other insert fault 500", async () => {
+	const failing = (message) => {
+		const env = environment();
+		const db = env.DB;
+		const prepare = (sql) =>
+			sql.trimStart().startsWith("INSERT OR IGNORE INTO batches")
+				? { bind: () => ({ run: async () => Promise.reject(new Error(message)) }) }
+				: db.prepare(sql);
+		return { ...env, DB: { raw: db.raw, prepare } };
+	};
+	const full = await call(failing("D1_ERROR: database or disk is full: SQLITE_FULL"), "/ingest", { body: one() });
+	assert.equal(full.status, 507);
+	assert.deepEqual(full.body, { error: "storage_full" });
+	const other = await call(failing("D1_ERROR: network connection lost"), "/ingest", { body: one() });
+	assert.equal(other.status, 500);
+	assert.deepEqual(other.body, { error: "insert_failed" });
 });
 
 test("the deep health check needs the key and says how fresh the live data is", async () => {

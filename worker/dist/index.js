@@ -12,7 +12,8 @@
  *     });
  *
  * One cron trigger, every hour: Cloudflare's free plan allows five an account. Every run is the
- * hourly scan; the run in `nightlyHourUtc` is also the nightly retention and yesterday's digest.
+ * hourly scan; the run in `nightlyHourUtc` is also the nightly retention and yesterday's digest,
+ * and every other run also the size wall alone.
  *
  * The doors:
  *   POST /ingest            a batch, with the ingest key in `x-api-key`
@@ -27,7 +28,7 @@ import { alertsFor, deliver, pruneAlertState, send } from "./alerts.js";
 import { announce, announcementOf } from "./announce.js";
 import { resolve, secret } from "./config.js";
 import { asText, authorised, createLimiter, ingest, json, secretsMatch } from "./ingest.js";
-import { freshness, retention } from "./retention.js";
+import { freshness, hourlyWall, retention } from "./retention.js";
 import { robloxKind, robloxWebhookText } from "./roblox.js";
 import { anomalies, digest } from "./scan.js";
 export { ANNOUNCE_TEXT, ANNOUNCE_TITLE } from "./announce.js";
@@ -45,6 +46,7 @@ export function createKit(given) {
         anomalies: (env) => anomalies(config, env),
         digest: (env) => digest(config, env),
         retention: (env) => retention(config, env),
+        hourlyWall: (env) => hourlyWall(config, env),
         isNightly: (scheduledTime) => new Date(scheduledTime).getUTCHours() === config.nightlyHourUtc,
         robloxWebhookText: (body) => robloxWebhookText(config, body),
         robloxWebhookChannel: (body) => config.robloxChannel(robloxKind(body)),
@@ -122,7 +124,8 @@ export function createWorker(given) {
         async scheduled(event, env, ctx) {
             const hourly = kit.anomalies(env).catch(logged("anomalies_failed"));
             if (!kit.isNightly(event.scheduledTime)) {
-                ctx.waitUntil(hourly);
+                // A day's rows past the budget go before the night, so D1 never holds two days of them.
+                ctx.waitUntil(hourly.then(() => kit.hourlyWall(env)).catch(logged("size_wall_failed")));
                 return;
             }
             // The digest reads the roll-up, so it follows the retention that makes it.

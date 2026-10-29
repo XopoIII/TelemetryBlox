@@ -44,6 +44,12 @@ interface CleanEvent extends SeenEvent {
 	t: number;
 }
 
+/** Whether a D1 error is the database at its size limit (SQLite's SQLITE_FULL, D1's own words). */
+export function storageFull(error: unknown): boolean {
+	const said = error instanceof Error ? error.message : String(error);
+	return /SQLITE_FULL|database or disk is full|maximum (database|db) size|database size limit/i.test(said);
+}
+
 export function json(body: unknown, status = 200): Response {
 	return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
@@ -252,7 +258,9 @@ export async function ingest(
 				count: events.length,
 			}),
 		);
-		// 5xx on purpose: the pipe sends the batch again, and the unique index makes that free.
+		// 5xx on purpose: the pipe sends the batch again, and the unique index makes that free. A
+		// database at its size limit answers 507, so the server's own warning names it.
+		if (storageFull(error)) return json({ error: "storage_full" }, 507);
 		return json({ error: "insert_failed" }, 500);
 	}
 

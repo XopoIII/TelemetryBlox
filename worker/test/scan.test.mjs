@@ -258,7 +258,7 @@ test("a cron run that fails is logged and breaks nothing", async () => {
 	} finally {
 		console.error = realError;
 	}
-	assert.deepEqual(lines, ["anomalies_failed", "anomalies_failed", "nightly_failed"]);
+	assert.deepEqual(lines, ["anomalies_failed", "size_wall_failed", "anomalies_failed", "nightly_failed"]);
 });
 
 test("Roblox's alert webhook is relayed, and only with the token", async () => {
