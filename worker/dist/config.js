@@ -11,6 +11,7 @@ export const DEFAULTS = {
     maxAlertsPerBatch: 8,
     retentionDays: 60,
     alertStateDays: 7,
+    silent: { hours: 2, every: 21_600 },
     maxRawEvents: 2_000_000,
     nightlyHourUtc: 3,
     nightlyReadWarn: 2_000_000,
@@ -163,6 +164,12 @@ export function resolve(config) {
         digest: config.digest === false
             ? null
             : { events: config.digest?.events ?? [...rules.keys()], text: config.digest?.text },
+        silent: config.silent === false || config.silent === undefined
+            ? null
+            : {
+                hours: positive(config.silent.hours, DEFAULTS.silent.hours, "silent.hours"),
+                every: positive(config.silent.every, DEFAULTS.silent.every, "silent.every"),
+            },
         retentionDays: positive(config.retentionDays, DEFAULTS.retentionDays, "retentionDays"),
         alertStateDays: positive(config.alertStateDays, DEFAULTS.alertStateDays, "alertStateDays"),
         maxRawEvents: positive(config.maxRawEvents, DEFAULTS.maxRawEvents, "maxRawEvents"),

@@ -48,6 +48,8 @@ export interface Kit {
     anomalies: (env: Env) => Promise<Record<string, unknown>>;
     /** Yesterday's digest. */
     digest: (env: Env) => Promise<boolean>;
+    /** The pipe's own watchdog: no live batch for a while. */
+    silent: (env: Env) => Promise<Record<string, unknown>>;
     /** The nightly roll-up and pruning. */
     retention: (env: Env) => Promise<Record<string, unknown>>;
     /** The size wall alone, as the hourly runs do it. */

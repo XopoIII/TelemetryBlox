@@ -30,7 +30,7 @@ import { resolve, secret } from "./config.js";
 import { asText, authorised, createLimiter, ingest, json, secretsMatch } from "./ingest.js";
 import { freshness, hourlyWall, retention } from "./retention.js";
 import { robloxKind, robloxWebhookText } from "./roblox.js";
-import { anomalies, digest } from "./scan.js";
+import { anomalies, digest, silent } from "./scan.js";
 export { ANNOUNCE_TEXT, ANNOUNCE_TITLE } from "./announce.js";
 export { DEFAULTS, field, MAX_SCAN_RULES, short, who } from "./config.js";
 export { SCHEMA_VERSION } from "./ingest.js";
@@ -45,6 +45,7 @@ export function createKit(given) {
         send: (env, message, channel) => send(config, env, message, channel),
         anomalies: (env) => anomalies(config, env),
         digest: (env) => digest(config, env),
+        silent: (env) => silent(config, env),
         retention: (env) => retention(config, env),
         hourlyWall: (env) => hourlyWall(config, env),
         isNightly: (scheduledTime) => new Date(scheduledTime).getUTCHours() === config.nightlyHourUtc,
@@ -123,13 +124,17 @@ export function createWorker(given) {
     return {
         async scheduled(event, env, ctx) {
             const hourly = kit.anomalies(env).catch(logged("anomalies_failed"));
+            // A pipe that is silent sends no row to say so: the watchdog asks the table itself.
+            const watchdog = kit.silent(env).catch(logged("silent_failed"));
             if (!kit.isNightly(event.scheduledTime)) {
                 // A day's rows past the budget go before the night, so D1 never holds two days of them.
-                ctx.waitUntil(hourly.then(() => kit.hourlyWall(env)).catch(logged("size_wall_failed")));
+                ctx.waitUntil(Promise.all([hourly, watchdog])
+                    .then(() => kit.hourlyWall(env))
+                    .catch(logged("size_wall_failed")));
                 return;
             }
             // The digest reads the roll-up, so it follows the retention that makes it.
-            ctx.waitUntil(hourly
+            ctx.waitUntil(Promise.all([hourly, watchdog])
                 .then(() => kit.retention(env))
                 .then(() => kit.digest(env))
                 .then(() => pruneAlertState(config, env))

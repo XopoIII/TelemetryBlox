@@ -22,3 +22,11 @@ export declare function findings(config: Resolved, row: Record<string, unknown>)
 export declare function anomalies(config: Resolved, env: Env): Promise<Record<string, unknown>>;
 /** Yesterday (UTC) in one message, from `events_daily`. Nothing is sent of a day with no live row. */
 export declare function digest(config: Resolved, env: Env): Promise<boolean>;
+/**
+ * The pipe's own watchdog (`silent`): the one failure the pipe cannot report itself, since a refused
+ * post leaves no row to carry a `telemetry_drop` — which is exactly what happened on 2026-10-28 and
+ * again on 2026-10-29, hours of silence while the game had its biggest days. One message once no
+ * live batch came for `hours`, then no more than one every `every` seconds while it lasts. Off
+ * unless the game asks for it. Yields.
+ */
+export declare function silent(config: Resolved, env: Env): Promise<Record<string, unknown>>;

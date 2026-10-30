@@ -128,6 +128,20 @@ export interface Marks {
  */
 export type RobloxKind = "erasure" | "test" | "refund" | "event" | "alert";
 
+/**
+ * The pipe's own watchdog: the one failure it cannot report itself. A game server that cannot post
+ * leaves no row behind, so a Worker whose ingest is refused, whose key is wrong or whose place has
+ * HTTP off sees nothing at all, and the owner reads a quiet chat as a quiet game.
+ *
+ *     silent: { hours: 2 }   // say it when no live batch came for two hours
+ */
+export interface SilentConfig {
+	/** Hours without a live batch that count as silence. 2 by default. */
+	hours?: number;
+	/** Seconds between two such messages while the silence lasts. 21,600 (six hours) by default. */
+	every?: number;
+}
+
 export interface WorkerConfig {
 	/** The game's name, said in every message. A batch tagged for another game is refused. */
 	game: string;
@@ -143,6 +157,8 @@ export interface WorkerConfig {
 	scan?: ScanRule[];
 	/** The nightly digest. `false`: none is sent. */
 	digest?: DigestConfig | false;
+	/** Say it in the chat when no live batch arrived for a while. `false` or absent: never. */
+	silent?: SilentConfig | false;
 	/** Days raw batches are kept. 60 by default. */
 	retentionDays?: number;
 	/**
@@ -217,6 +233,7 @@ export interface Resolved {
 	maxAlerts: number;
 	scan: ScanRule[];
 	digest: { events: string[]; text?: (day: DigestDay) => string } | null;
+	silent: { hours: number; every: number } | null;
 	retentionDays: number;
 	alertStateDays: number;
 	maxRawEvents: number;
@@ -240,6 +257,7 @@ export const DEFAULTS = {
 	maxAlertsPerBatch: 8,
 	retentionDays: 60,
 	alertStateDays: 7,
+	silent: { hours: 2, every: 21_600 },
 	maxRawEvents: 2_000_000,
 	nightlyHourUtc: 3,
 	nightlyReadWarn: 2_000_000,
@@ -406,6 +424,13 @@ export function resolve(config: WorkerConfig): Resolved {
 			config.digest === false
 				? null
 				: { events: config.digest?.events ?? [...rules.keys()], text: config.digest?.text },
+		silent:
+			config.silent === false || config.silent === undefined
+				? null
+				: {
+						hours: positive(config.silent.hours, DEFAULTS.silent.hours, "silent.hours"),
+						every: positive(config.silent.every, DEFAULTS.silent.every, "silent.every"),
+					},
 		retentionDays: positive(config.retentionDays, DEFAULTS.retentionDays, "retentionDays"),
 		alertStateDays: positive(config.alertStateDays, DEFAULTS.alertStateDays, "alertStateDays"),
 		maxRawEvents: positive(config.maxRawEvents, DEFAULTS.maxRawEvents, "maxRawEvents"),

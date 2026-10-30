@@ -4,6 +4,24 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.8.6 - 2026-10-30
+
+The pipe is that of 0.8.5: `src/` does not change, the wire is as it was (`schemaVersion` 1) and no
+migration is added. The Worker changes: a game that moves to it deploys its Worker.
+
+### Added
+
+- **A watchdog for a silent pipe (`silent`).** The pipe's one failure it cannot report itself: a
+  server that cannot post leaves no row behind, so a refused ingest, a wrong key or a place with
+  HTTP off is invisible — the chat is quiet, and so is the game. On 2026-10-28 from 18:35 to 23:50
+  UTC and again from 2026-10-29 20:00 on, D1 sat at its size limit and refused every batch, and the
+  only rows that would have said so were the game's own `telemetry_drop` rows, which could not
+  arrive either. `silent: { hours?, every? }` now has each hourly run ask the table for the newest
+  live batch: none for `hours` (2 by default) is one critical message, and no more than one every
+  `every` seconds (21,600, six hours, by default) while the silence lasts. A table that never took
+  a live batch is a configuration fault and says so in its own words. A game that does not set it is
+  never told: nothing changes for a deployment that does not ask.
+
 ## 0.8.5 - 2026-10-29
 
 The pipe is that of 0.8.4: `src/` does not change, the wire is as it was (`schemaVersion` 1) and no
