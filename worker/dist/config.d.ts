@@ -116,6 +116,19 @@ export interface Marks {
  * a refund, any other named event, or an analytics alert (and anything unrecognised).
  */
 export type RobloxKind = "erasure" | "test" | "refund" | "event" | "alert";
+/**
+ * The pipe's own watchdog: the one failure it cannot report itself. A game server that cannot post
+ * leaves no row behind, so a Worker whose ingest is refused, whose key is wrong or whose place has
+ * HTTP off sees nothing at all, and the owner reads a quiet chat as a quiet game.
+ *
+ *     silent: { hours: 2 }   // say it when no live batch came for two hours
+ */
+export interface SilentConfig {
+    /** Hours without a live batch that count as silence. 2 by default. */
+    hours?: number;
+    /** Seconds between two such messages while the silence lasts. 21,600 (six hours) by default. */
+    every?: number;
+}
 export interface WorkerConfig {
     /** The game's name, said in every message. A batch tagged for another game is refused. */
     game: string;
@@ -131,6 +144,8 @@ export interface WorkerConfig {
     scan?: ScanRule[];
     /** The nightly digest. `false`: none is sent. */
     digest?: DigestConfig | false;
+    /** Say it in the chat when no live batch arrived for a while. `false` or absent: never. */
+    silent?: SilentConfig | false;
     /** Days raw batches are kept. 60 by default. */
     retentionDays?: number;
     /**
@@ -206,6 +221,10 @@ export interface Resolved {
         events: string[];
         text?: (day: DigestDay) => string;
     } | null;
+    silent: {
+        hours: number;
+        every: number;
+    } | null;
     retentionDays: number;
     alertStateDays: number;
     maxRawEvents: number;
@@ -228,6 +247,10 @@ export declare const DEFAULTS: {
     maxAlertsPerBatch: number;
     retentionDays: number;
     alertStateDays: number;
+    silent: {
+        hours: number;
+        every: number;
+    };
     maxRawEvents: number;
     nightlyHourUtc: number;
     nightlyReadWarn: number;

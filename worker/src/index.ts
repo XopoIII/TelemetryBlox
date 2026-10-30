@@ -31,7 +31,7 @@ import { type Env, type Resolved, resolve, type SeenEvent, secret, type WorkerCo
 import { asText, authorised, createLimiter, ingest, json, secretsMatch } from "./ingest.js";
 import { freshness, hourlyWall, retention, type Wall } from "./retention.js";
 import { robloxKind, robloxWebhookText } from "./roblox.js";
-import { anomalies, digest } from "./scan.js";
+import { anomalies, digest, silent } from "./scan.js";
 
 export type { Alert, BatchMeta } from "./alerts.js";
 export type { Announcement } from "./announce.js";
@@ -70,6 +70,8 @@ export interface Kit {
 	anomalies: (env: Env) => Promise<Record<string, unknown>>;
 	/** Yesterday's digest. */
 	digest: (env: Env) => Promise<boolean>;
+	/** The pipe's own watchdog: no live batch for a while. */
+	silent: (env: Env) => Promise<Record<string, unknown>>;
 	/** The nightly roll-up and pruning. */
 	retention: (env: Env) => Promise<Record<string, unknown>>;
 	/** The size wall alone, as the hourly runs do it. */
@@ -92,6 +94,7 @@ export function createKit(given: WorkerConfig): Kit {
 		send: (env, message, channel) => send(config, env, message, channel),
 		anomalies: (env) => anomalies(config, env),
 		digest: (env) => digest(config, env),
+		silent: (env) => silent(config, env),
 		retention: (env) => retention(config, env),
 		hourlyWall: (env) => hourlyWall(config, env),
 		isNightly: (scheduledTime) => new Date(scheduledTime).getUTCHours() === config.nightlyHourUtc,
@@ -164,14 +167,20 @@ export function createWorker(given: WorkerConfig): ExportedHandler<Env> {
 	return {
 		async scheduled(event, env, ctx) {
 			const hourly = kit.anomalies(env).catch(logged("anomalies_failed"));
+			// A pipe that is silent sends no row to say so: the watchdog asks the table itself.
+			const watchdog = kit.silent(env).catch(logged("silent_failed"));
 			if (!kit.isNightly(event.scheduledTime)) {
 				// A day's rows past the budget go before the night, so D1 never holds two days of them.
-				ctx.waitUntil(hourly.then(() => kit.hourlyWall(env)).catch(logged("size_wall_failed")));
+				ctx.waitUntil(
+					Promise.all([hourly, watchdog])
+						.then(() => kit.hourlyWall(env))
+						.catch(logged("size_wall_failed")),
+				);
 				return;
 			}
 			// The digest reads the roll-up, so it follows the retention that makes it.
 			ctx.waitUntil(
-				hourly
+				Promise.all([hourly, watchdog])
 					.then(() => kit.retention(env))
 					.then(() => kit.digest(env))
 					.then(() => pruneAlertState(config, env))

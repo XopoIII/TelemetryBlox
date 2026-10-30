@@ -124,3 +124,34 @@ export async function digest(config: Resolved, env: Env): Promise<boolean> {
 	const said = config.digest.text ? config.digest.text(day) : lines.join("\n");
 	return send(config, env, `${config.marks.digest} ${config.game}, yesterday: ${said}`);
 }
+
+/**
+ * The pipe's own watchdog (`silent`): the one failure the pipe cannot report itself, since a refused
+ * post leaves no row to carry a `telemetry_drop` — which is exactly what happened on 2026-10-28 and
+ * again on 2026-10-29, hours of silence while the game had its biggest days. One message once no
+ * live batch came for `hours`, then no more than one every `every` seconds while it lasts. Off
+ * unless the game asks for it. Yields.
+ */
+export async function silent(config: Resolved, env: Env): Promise<Record<string, unknown>> {
+	if (!config.silent) return { message: "silent", watched: false };
+	const row = await database(env, config)
+		.prepare(`SELECT MAX(received_at) AS last, unixepoch('now') AS now FROM batches WHERE env = 'live'`)
+		.first<{ last: number | null; now: number }>();
+	const now = row?.now ?? Math.floor(Date.now() / 1000);
+	const last = row?.last ?? null;
+	const waited = last === null ? null : Math.max(0, now - last);
+	if (waited !== null && waited < config.silent.hours * 3600) {
+		return { message: "silent", watched: true, last, waited, sent: 0 };
+	}
+	const text =
+		last === null
+			? "No live batch has ever arrived: the ingest key, the Worker's address or HTTP in the place"
+			: `No live batch for ${Math.floor((waited ?? 0) / 3600)} h (last at ${new Date(last * 1000).toISOString()}): the pipe is refused or the game is not posting`;
+	const sent = await deliver(
+		config,
+		env,
+		[{ key: "silent", severity: "critical", text, cooldown: config.silent.every }],
+		now,
+	);
+	return { message: "silent", watched: true, last, waited, sent };
+}
