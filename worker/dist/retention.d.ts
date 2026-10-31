@@ -23,6 +23,8 @@ import { type Env, type Resolved } from "./config.js";
 export declare const PRUNE_CHUNK = 2000;
 /** Queries this job may spend; the free plan allows 50 an invocation, and the rest are overhead. */
 export declare const QUERY_BUDGET = 40;
+/** Seconds of a day in one slice of the fallback roll-up: a day too big for one statement. */
+export declare const SLICE_SECONDS: number;
 export declare function retention(config: Resolved, env: Env): Promise<Record<string, unknown>>;
 /** What the size wall did. `warn` says why events are still over budget, if they are. */
 export interface Wall {

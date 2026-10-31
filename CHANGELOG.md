@@ -4,6 +4,30 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.8.7 - 2026-10-31
+
+The pipe of 0.8.6: `src/` does not change, the wire is as it was (`schemaVersion` 1). The Worker and
+the schema change, so a game that moves to it deploys its Worker and applies the migrations.
+
+### Fixed
+
+- **A night's roll-up dies on a day too big for one statement.** On 2026-10-31 a game's database
+  answered `out of memory: SQLITE_NOMEM` to the nightly roll-up over a day of 1.9 million events:
+  the one statement grouped every event since the last rolled-up day, and the free plan's statement
+  memory is not that large. The job now rolls up **one day at a time**, from the list of days the
+  batches actually hold, so a small day costs a small statement and nothing walks a day with no
+  rows. A day that still will not go in one statement is rolled up **in slices of six hours**, its
+  events counted exactly, and its '*' row summed from the per-event rows it wrote.
+
+### Changed
+
+- **A player count nobody has is left empty, not written as zero.** The slices cannot give a day's
+  distinct players per event (that is the set that did not fit), so `events_daily.actors` is
+  nullable now (migration `0003_unknown_players.sql`), and the sliced day's rows carry nothing
+  there. A read shows nothing rather than a number it would be lying with.
+- **The nightly report names the days rolled up in slices** (`sliced`), so a night that fell back
+  says so on its own line.
+
 ## 0.8.6 - 2026-10-30
 
 The pipe is that of 0.8.5: `src/` does not change, the wire is as it was (`schemaVersion` 1) and no

@@ -27,9 +27,61 @@ export const QUERY_BUDGET = 40;
 const DAY_SECONDS = 86_400;
 /** How far before its day a day's batch may be received: a server's clock running ahead. */
 const CLOCK_SLACK_SECONDS = 3600;
+/** Seconds of a day in one slice of the fallback roll-up: a day too big for one statement. */
+export const SLICE_SECONDS = 6 * 3600;
+/** A finished day rolled up in one statement: exact, and only when the day fits in memory. */
+const EXACT_DAY = `WITH x AS MATERIALIZED (
+	SELECT date(json_extract(e.value,'$.t'),'unixepoch') AS day,
+	       json_extract(e.value,'$.event') AS event, b.env AS env, b.universe_id AS universe_id,
+	       json_extract(e.value,'$.actor') AS actor, COUNT(*) AS n
+	FROM batches b, json_each(b.events) e
+	WHERE b.received_at >= ?1 - ${CLOCK_SLACK_SECONDS} AND b.received_at < ?2 + ${CLOCK_SLACK_SECONDS} + ${2 * DAY_SECONDS}
+	  AND json_extract(e.value,'$.t') >= ?1 AND json_extract(e.value,'$.t') < ?2
+	GROUP BY day, event, env, universe_id, actor
+)
+INSERT OR REPLACE INTO events_daily (day, event, env, universe_id, events, actors)
+SELECT day, event, env, universe_id, SUM(n), COUNT(actor) FROM x GROUP BY day, event, env, universe_id
+UNION ALL
+SELECT day, '*', env, universe_id, SUM(n), COUNT(DISTINCT actor) FROM x GROUP BY day, env, universe_id`;
+/** One slice of a day: its events counted, its players left unknown. */
+const SLICE = `INSERT INTO events_daily (day, event, env, universe_id, events, actors)
+SELECT date(json_extract(e.value,'$.t'),'unixepoch') AS day,
+	       json_extract(e.value,'$.event') AS event, b.env AS env, b.universe_id AS universe_id,
+	       COUNT(*) AS events, NULL
+	FROM batches b, json_each(b.events) e
+	WHERE b.received_at >= ?1 - ${CLOCK_SLACK_SECONDS} AND b.received_at < ?2 + ${CLOCK_SLACK_SECONDS} + ${2 * DAY_SECONDS}
+	  AND json_extract(e.value,'$.t') >= ?1 AND json_extract(e.value,'$.t') < ?2
+	GROUP BY day, event, env, universe_id
+	ON CONFLICT(day, event, env, universe_id) DO UPDATE SET events = events + excluded.events`;
+/** The '*' row of a sliced day: the day's events summed from its own per-event rows. */
+const STAR = `INSERT OR REPLACE INTO events_daily (day, event, env, universe_id, events, actors)
+SELECT day, '*', env, universe_id, SUM(events), NULL FROM events_daily
+	WHERE day = date(?1, 'unixepoch') AND event <> '*' GROUP BY env, universe_id`;
 /** A `YYYY-MM-DD` day's midnight, UTC, in seconds. */
 function unixDay(day) {
     return Date.parse(`${day}T00:00:00Z`) / 1000;
+}
+/**
+ * A day rolled up in slices of `SLICE_SECONDS`: its events counted exactly, its per-event players
+ * left unknown -- a day that will not fit in one statement will not fit its distinct set either --
+ * and its '*' row summed from the per-event rows it wrote.
+ */
+async function sliceDay(db, day, count, read) {
+    let changes = 0;
+    for (let from = day; from < day + DAY_SECONDS; from += SLICE_SECONDS) {
+        const res = await db
+            .prepare(SLICE)
+            .bind(from, from + SLICE_SECONDS)
+            .run();
+        count();
+        read(res);
+        changes += res.meta?.changes ?? 0;
+    }
+    const star = await db.prepare(STAR).bind(day).run();
+    count();
+    read(star);
+    changes += star.meta?.changes ?? 0;
+    return changes;
 }
 export async function retention(config, env) {
     const db = database(env, config);
@@ -74,32 +126,49 @@ export async function retention(config, env) {
     read(firsts);
     await db.prepare(`INSERT OR REPLACE INTO alert_cursor (name, batch_id) VALUES ('actors', ?1)`).bind(to).run();
     queries++;
-    // 2. Roll up the finished days after the last one rolled up, per event and as a whole, from one
-    //    expansion: the events grouped by player first, then summed per event and, under event '*',
-    //    across them, since the distinct players of the whole day are what no sum over the per-event
-    //    rows gives. Batches are narrowed by `received_at` BEFORE json_each expands them, from an hour
-    //    before the first day (servers' clocks), with no upper end: a day's last batches arrive after
-    //    its midnight. A batch of a settled day that arrives after its night is not counted in it.
-    const firstDay = floorDay ? unixDay(floorDay) + DAY_SECONDS : 0;
-    const rolled = await db
-        .prepare(`WITH x AS MATERIALIZED (
-			   SELECT date(json_extract(e.value,'$.t'),'unixepoch') AS day,
-			          json_extract(e.value,'$.event') AS event, b.env AS env, b.universe_id AS universe_id,
-			          json_extract(e.value,'$.actor') AS actor, COUNT(*) AS n
-			   FROM batches b, json_each(b.events) e
-			   WHERE b.received_at >= ?1 - ${CLOCK_SLACK_SECONDS}
-			     AND json_extract(e.value,'$.t') >= ?1
-			     AND json_extract(e.value,'$.t') < unixepoch(date('now'))
-			   GROUP BY day, event, env, universe_id, actor
-			 )
-			 INSERT OR REPLACE INTO events_daily (day, event, env, universe_id, events, actors)
-			 SELECT day, event, env, universe_id, SUM(n), COUNT(actor) FROM x GROUP BY day, event, env, universe_id
-			 UNION ALL
-			 SELECT day, '*', env, universe_id, SUM(n), COUNT(DISTINCT actor) FROM x GROUP BY day, env, universe_id`)
-        .bind(firstDay)
-        .run();
+    // 2. Roll up the finished days after the last one rolled up, ONE DAY AT A TIME: a day of a big
+    //    game does not fit in one statement (2026-10-31: SQLITE_NOMEM over 1.9 million events, 3.9
+    //    million rows read). A day that will not go in one goes in slices of `SLICE_SECONDS`, its
+    //    events exact and its per-event players left unknown -- a number nobody has is better than a
+    //    number that is wrong. Batches are narrowed by `received_at` before json_each expands them.
+    const rolledFrom = floorDay ? unixDay(floorDay) + DAY_SECONDS : 0;
+    const now = Math.floor(Date.now() / 1000);
+    const lastDay = now - (now % DAY_SECONDS) - DAY_SECONDS;
+    // Which days the batches hold, in one pass: a day with no row is not walked over at all.
+    const found = await db
+        .prepare(`SELECT DISTINCT date(json_extract(e.value,'$.t'),'unixepoch') AS day
+			 FROM batches b, json_each(b.events) e
+			 WHERE b.received_at >= ?1 - ${CLOCK_SLACK_SECONDS}
+			 GROUP BY day ORDER BY day`)
+        .bind(rolledFrom > 0 ? rolledFrom - DAY_SECONDS : 0)
+        .all();
     queries++;
-    read(rolled);
+    read(found);
+    let rolled = 0;
+    const sliced = [];
+    for (const row of found.results ?? []) {
+        if (!row.day)
+            continue;
+        const day = unixDay(row.day);
+        if (day < rolledFrom || day > lastDay || queries >= QUERY_BUDGET - 8)
+            continue;
+        try {
+            const one = await db
+                .prepare(EXACT_DAY)
+                .bind(day, day + DAY_SECONDS)
+                .run();
+            queries++;
+            read(one);
+            rolled += one.meta?.changes ?? 0;
+        }
+        catch {
+            const cut = await sliceDay(db, day, () => {
+                queries++;
+            }, read);
+            rolled += cut;
+            sliced.push(row.day);
+        }
+    }
     // 2. Past the age window, oldest first, in chunks.
     let deleted = 0;
     while (queries < QUERY_BUDGET) {
@@ -122,8 +191,9 @@ export async function retention(config, env) {
     deleted += wall.overBudgetBatches;
     const report = {
         message: "retention",
-        rolledUp: rolled.meta?.changes ?? 0,
-        rolledFrom: firstDay ? new Date(firstDay * 1000).toISOString().slice(0, 10) : "1970-01-01",
+        rolledUp: rolled,
+        rolledFrom: rolledFrom ? new Date(rolledFrom * 1000).toISOString().slice(0, 10) : "1970-01-01",
+        sliced,
         newActors: firsts.meta?.changes ?? 0,
         deletedBatches: deleted,
         overBudgetBatches: wall.overBudgetBatches,

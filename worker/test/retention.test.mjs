@@ -178,6 +178,37 @@ test("the size wall never takes the day being collected, and says so once a nigh
 	]);
 });
 
+test("a day that will not go in one statement is rolled up in slices, its players left unknown", async () => {
+	const env = environment();
+	const yesterday = TODAY - DAY + HOUR;
+	store(env, yesterday, [
+		[yesterday, "feed", "u_a"],
+		[yesterday, "feed", "u_b"],
+	]);
+	// A day of millions answers SQLITE_NOMEM on the one statement, as the live one did on 2026-10-31.
+	const base = env.DB;
+	const broken = {
+		...env,
+		DB: {
+			raw: base.raw,
+			prepare: (sql) => {
+				if (sql.includes("MATERIALIZED")) throw new Error("D1_ERROR: out of memory: SQLITE_NOMEM");
+				return base.prepare(sql);
+			},
+		},
+	};
+	const report = (await call(broken, "/retention")).body;
+	assert.deepEqual(report.sliced, [day(yesterday)]);
+	const kept = rows(
+		env,
+		`SELECT event, events, actors FROM events_daily WHERE day = '${day(yesterday)}' ORDER BY event`,
+	).map((r) => ({ ...r }));
+	assert.deepEqual(kept, [
+		{ event: "*", events: 2, actors: null },
+		{ event: "feed", events: 2, actors: null },
+	]);
+});
+
 test("the size wall leaves a batch who was first seen has not read", async () => {
 	const tiny = createWorker({ ...CONFIG, maxRawEvents: 1 });
 	const env = environment();
