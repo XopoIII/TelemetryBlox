@@ -28,5 +28,11 @@ export declare function digest(config: Resolved, env: Env): Promise<boolean>;
  * again on 2026-10-29, hours of silence while the game had its biggest days. One message once no
  * live batch came for `hours`, then no more than one every `every` seconds while it lasts. Off
  * unless the game asks for it. Yields.
+ *
+ * A table that cannot be read at all is the same silence one level up: the plan's day of reads
+ * spent or the database at its size wall, and every read refused. On 2026-10-31 that mute lasted a
+ * whole day, this watchdog included, for its own question is a read and its cool-down gate another.
+ * The message then goes straight to the chat, once an hourly run while it lasts, past a gate that
+ * cannot be asked.
  */
 export declare function silent(config: Resolved, env: Env): Promise<Record<string, unknown>>;

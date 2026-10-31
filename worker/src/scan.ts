@@ -11,7 +11,7 @@
  */
 
 import { type Alert, bySeverity, deliver, send } from "./alerts.js";
-import { type DigestDay, database, type Env, type Resolved, type ScanRule, who } from "./config.js";
+import { type DigestDay, database, type Env, type Resolved, type ScanRule, short, who } from "./config.js";
 
 const EVENT = "json_extract(e.value,'$.event')";
 
@@ -131,12 +131,32 @@ export async function digest(config: Resolved, env: Env): Promise<boolean> {
  * again on 2026-10-29, hours of silence while the game had its biggest days. One message once no
  * live batch came for `hours`, then no more than one every `every` seconds while it lasts. Off
  * unless the game asks for it. Yields.
+ *
+ * A table that cannot be read at all is the same silence one level up: the plan's day of reads
+ * spent or the database at its size wall, and every read refused. On 2026-10-31 that mute lasted a
+ * whole day, this watchdog included, for its own question is a read and its cool-down gate another.
+ * The message then goes straight to the chat, once an hourly run while it lasts, past a gate that
+ * cannot be asked.
  */
 export async function silent(config: Resolved, env: Env): Promise<Record<string, unknown>> {
 	if (!config.silent) return { message: "silent", watched: false };
-	const row = await database(env, config)
-		.prepare(`SELECT MAX(received_at) AS last, unixepoch('now') AS now FROM batches WHERE env = 'live'`)
-		.first<{ last: number | null; now: number }>();
+	let row: { last: number | null; now: number } | null = null;
+	try {
+		row = await database(env, config)
+			.prepare(`SELECT MAX(received_at) AS last, unixepoch('now') AS now FROM batches WHERE env = 'live'`)
+			.first<{ last: number | null; now: number }>();
+	} catch (error) {
+		// No row can name a refused read, and the gate's table is as unreadable as the batches table,
+		// so the chat is written directly: one message an hourly run, the rate a wall that is not
+		// lifted has always been allowed (the `telemetry_drop` cool-down is an hour for that reason).
+		const why = short(error instanceof Error ? error.message : String(error), 90);
+		const said = await send(
+			config,
+			env,
+			`${config.marks.critical} ${config.game}: The batches table cannot be read (${why}); every alert is held with it`,
+		);
+		return { message: "silent", watched: true, unreadable: true, sent: said ? 1 : 0 };
+	}
 	const now = row?.now ?? Math.floor(Date.now() / 1000);
 	const last = row?.last ?? null;
 	const waited = last === null ? null : Math.max(0, now - last);
