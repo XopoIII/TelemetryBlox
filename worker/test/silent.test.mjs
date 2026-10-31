@@ -39,6 +39,27 @@ test("a fresh batch keeps it quiet, and one past its hours does not", async () =
 	assert.equal((await WATCHED.silent(env)).sent, 0);
 });
 
+test("a table whose read is refused is said at once, past the gate it cannot ask", async () => {
+	// D1 refusing every read of the day (the free plan's row budget spent): no row can name it and
+	// the cool-down gate is as unreadable as the table, so the chat is written directly
+	const refused = {
+		DB: {
+			prepare: () => {
+				throw new Error("D1_ERROR: exceeded D1's free tier daily row read limit");
+			},
+		},
+	};
+	const said = await WATCHED.silent(environment(refused));
+	assert.deepEqual([said.watched, said.unreadable, said.sent], [true, true, 1]);
+	assert.match(texts()[0], /\[critical\] Example Game: The batches table cannot be read \(D1_ERROR/);
+	assert.match(texts()[0], /every alert is held with it/);
+	// and again the next hourly run: nothing counts the repeats while every read is refused
+	assert.equal((await WATCHED.silent(environment(refused))).sent, 1);
+	assert.equal(texts().length, 2);
+	// a game that did not ask for the watchdog is told nothing of it
+	assert.deepEqual(await UNWATCHED.silent(environment(refused)), { message: "silent", watched: false });
+});
+
 test("a game that did not ask for the watchdog is never told", async () => {
 	const env = environment();
 	assert.deepEqual(await UNWATCHED.silent(env), { message: "silent", watched: false });

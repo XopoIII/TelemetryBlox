@@ -4,6 +4,21 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.8.8 - 2026-10-31
+
+The pipe of 0.8.7: `src/` does not change, the wire and the schema are as they were, so a game that
+moves to it deploys its Worker and applies no migration.
+
+### Fixed
+
+- **The watchdog is muted when every read is refused.** On 2026-10-31 a game's free plan spent its
+  day of D1 row reads by the small hours, and every read was refused until midnight UTC: the scan
+  could not read, and the `silent` watchdog could not ask its one question — its own read is what
+  refused, and its cool-down gate is another read — so the chat stayed quiet a whole day. The
+  watchdog now tells a table that cannot be read from one that has nothing to say: the message goes
+  straight to the chat, once an hourly run while it lasts, the rate a wall that is not lifted has
+  always been allowed (`telemetry_drop`'s cool-down is an hour for that reason).
+
 ## 0.8.7 - 2026-10-31
 
 The pipe of 0.8.6: `src/` does not change, the wire is as it was (`schemaVersion` 1). The Worker and
