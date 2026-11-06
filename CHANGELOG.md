@@ -4,6 +4,26 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.9.2 - 2026-11-06
+
+The pipe does not change (`src/` is 0.8.8's), the schema is as 0.9.0 left it, and no migration is
+needed; a game that moves to it deploys its Worker.
+
+### Fixed
+
+- **The first-seen step is measured in batches, and runs before the roll-up.** 0.9.1 counted its range
+  in events and asked D1 to expand every batch of it in one statement; on a backlog of 10.7 million
+  events D1 answered `D1 DB is overloaded. Too many resources consumed within a 10 second window` to
+  the range's own boundary read, the refusal escaped the retry, and the route answered 500 before a
+  single day was rolled up. The step now takes at most `ACTOR_BATCH_CHUNK` (200) batches a read,
+  finds the range's end with an index read (`ORDER BY id LIMIT`), and runs before the roll-up with
+  its queries reserved from the same budget, so a backlog drains over runs while the night still
+  keeps its own share. A read D1 refuses retries at a fifth of the width (200, 40, 8, 1 batches), and
+  a run that cannot fit even one reports `firstsFailed` instead of dying.
+- **The end of a range is a read that can be retried.** It goes through `firstOf()`, which returns
+  D1's refusal as a value; before, the refusal was thrown past the chunk ladder and became the
+  route's 500.
+
 ## 0.9.1 - 2026-11-06
 
 The pipe does not change (`src/` is 0.8.8's) and the schema is as 0.9.0 left it, so a game that

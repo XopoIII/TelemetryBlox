@@ -84,7 +84,7 @@ export interface Firsts {
     newActors: number;
     /** The batch id the cursor stands at: everything at or before it is kept. */
     to: number;
-    /** The range that would not go in, even a thousand events at a time. */
+    /** The range that would not go in, even one batch at a time. */
     failed?: {
         batch: number;
         error: string;
@@ -93,8 +93,8 @@ export interface Firsts {
 /**
  * Who was first seen when, kept BEFORE the prune can take the rows that say so. The bare
  * `place_version` beside MIN(t) is that oldest row's own (SQLite's rule for a lone MIN). A player
- * already kept is ignored, so each costs one row written, once. The batches go in ranges whose own
- * counts fit `chunk`, and the cursor moves past a range only once that range is in, so a run D1
+ * already kept is ignored, so each costs one row written, once. The batches go in ranges of at most
+ * `chunk` arrivals, and the cursor moves past a range only once that range is in, so a run D1
  * cuts off leaves the rest to the next. With no cursor yet (a new database, or one from before it),
  * the window of the roll-up and the day before it.
  */

@@ -52,13 +52,16 @@ const SLICE_CAP = 8;
 /** Queries kept out of the roll-up's reach for the age prune and the size wall, whose loops need them. */
 const QUERY_RESERVE = 8;
 /**
- * Events one statement of the first-seen step may expand, and the queries every run keeps for it.
- * The step once expanded every batch after its cursor in one statement. On a database that had not
- * run for days that was the whole backlog -- 2026-11-06, 10.7 million events -- and D1 answered an
- * internal error, which escaped before the roll-up ever ran: no day was rolled up and nothing was
- * kept, night after night.
+ * Batches one statement of the first-seen step may expand, and the queries every run keeps for it.
+ * A batch holds at most a thousand events, so this bounds the statement's work; the step once
+ * expanded every batch after its cursor in one statement. On a database that had not run for days
+ * that was the whole backlog -- 2026-11-06, 10.7 million events -- and D1 answered an internal
+ * error, which escaped before the roll-up ever ran: no day was rolled up and nothing was kept,
+ * night after night. Counting batches rather than events keeps the boundary one index scan of a
+ * couple of hundred rows; a windowed sum over every batch at a time is itself a statement D1
+ * refused as overloaded.
  */
-const ACTOR_EVENT_CHUNK = 250_000;
+const ACTOR_BATCH_CHUNK = 200;
 const ACTOR_MIN_QUERIES = 8;
 /** The roll-up's cursor, and what a database without one starts from. */
 const STATE = `SELECT
@@ -132,14 +135,13 @@ const STAR_ACTORS = `UPDATE events_daily SET actors = (
 )
 WHERE day = ?3 AND event = '*'`;
 /**
- * The end of the next range of batches for the first-seen step: the last arrival whose own event
- * count still fits the chunk. Reading the batches' counts and not their events keeps a chunk of
- * the backlog a scan of the index rather than the memory of everything in it.
+ * The end of the next range of batches for the first-seen step: the last of at most ?3 arrivals
+ * after ?1. A read of the index alone -- no event expanded, no count walked -- so finding the
+ * boundary cannot itself become the statement that will not fit.
  */
 const CHUNK_END = `SELECT MAX(id) AS last FROM (
-	SELECT id, SUM(n) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cum
-	FROM batches WHERE id > ?1 AND id <= ?2
-) WHERE cum <= ?3`;
+	SELECT id FROM batches WHERE id > ?1 AND id <= ?2 ORDER BY id LIMIT ?3
+)`;
 /** Who was first seen when, over one bounded range of batches. */
 const FIRSTS = `INSERT OR IGNORE INTO actors (actor, env, universe_id, first_seen, first_version)
 	SELECT actor, env, universe_id, MIN(t), place_version
@@ -182,6 +184,15 @@ function bootstrapDay(rolled, first, lastDay) {
 async function attempt(statement) {
     try {
         return await statement().run();
+    }
+    catch (error) {
+        return error instanceof Error ? error : new Error(String(error));
+    }
+}
+/** The same, for a one-row read: a boundary D1 refuses is a value to retry at, not the end. */
+async function firstOf(statement) {
+    try {
+        return { row: await statement().first() };
     }
     catch (error) {
         return error instanceof Error ? error : new Error(String(error));
@@ -345,12 +356,12 @@ async function rollUpDays(db, meter, read, ceiling = QUERY_BUDGET - QUERY_RESERV
 /**
  * Who was first seen when, kept BEFORE the prune can take the rows that say so. The bare
  * `place_version` beside MIN(t) is that oldest row's own (SQLite's rule for a lone MIN). A player
- * already kept is ignored, so each costs one row written, once. The batches go in ranges whose own
- * counts fit `chunk`, and the cursor moves past a range only once that range is in, so a run D1
+ * already kept is ignored, so each costs one row written, once. The batches go in ranges of at most
+ * `chunk` arrivals, and the cursor moves past a range only once that range is in, so a run D1
  * cuts off leaves the rest to the next. With no cursor yet (a new database, or one from before it),
  * the window of the roll-up and the day before it.
  */
-export async function firsts(db, meter, read, ceiling, chunk = ACTOR_EVENT_CHUNK) {
+export async function firsts(db, meter, read, ceiling, chunk = ACTOR_BATCH_CHUNK) {
     const cursor = await db
         .prepare(`SELECT batch_id FROM alert_cursor WHERE name = 'actors'`)
         .first();
@@ -365,26 +376,27 @@ export async function firsts(db, meter, read, ceiling, chunk = ACTOR_EVENT_CHUNK
     let newActors = 0;
     let width = chunk;
     while (from < to && meter.queries + 2 <= ceiling) {
-        const end = await db.prepare(CHUNK_END).bind(from, to, width).first();
+        // The boundary is a read of the index, and even that can be the statement D1 is too busy
+        // for: it is tried as a range that may be retried, never an error that ends the run.
+        const end = await firstOf(() => db.prepare(CHUNK_END).bind(from, to, width));
         meter.queries++;
-        let last = end?.last ?? null;
-        // Nothing fits the chunk: the very next batch is wider on its own, so take it alone.
-        if (last === null) {
-            const next = await db
-                .prepare(`SELECT MIN(id) AS id FROM batches WHERE id > ?1 AND id <= ?2`)
-                .first();
-            meter.queries++;
-            if (next?.id == null)
-                break;
-            last = next.id;
+        if (end instanceof Error) {
+            if (width > 1) {
+                width = Math.max(1, Math.floor(width / 5));
+                continue;
+            }
+            return { newActors, to: from, failed: { batch: to, error: end.message } };
         }
+        const last = end.row?.last ?? null;
+        if (last === null)
+            break;
         const res = await attempt(() => db.prepare(FIRSTS).bind(from, last, floor));
         meter.queries++;
         if (res instanceof Error) {
-            // More than D1 will expand in one statement: a fifth of the chunk, then a fifth again,
-            // down to a thousand events a statement; a run that cannot fit even that says so.
-            if (width > 1000) {
-                width = Math.max(1000, Math.floor(width / 5));
+            // More than D1 will expand in one statement, or it is too busy for it: a fifth of the
+            // chunk, then a fifth again, down to one batch; a run that cannot fit even that says so.
+            if (width > 1) {
+                width = Math.max(1, Math.floor(width / 5));
                 continue;
             }
             return { newActors, to: from, failed: { batch: last, error: res.message } };
@@ -416,14 +428,16 @@ export async function retention(config, env) {
     const read = (res) => {
         meter.rowsRead += res.meta?.rows_read ?? 0;
     };
-    // 1. The finished days after the cursor FIRST. The same bounded roll-up the hourly runs make, so
-    //    a backlog drains an hour at a time instead of waiting for a night that may not finish it.
-    //    It goes before the first-seen step because a step that will not fit must not stop the
-    //    night's roll-up from happening at all: on 2026-11-06 it did, night after night.
-    const rolled = await rollUpDays(db, meter, read, QUERY_BUDGET - QUERY_RESERVE - ACTOR_MIN_QUERIES);
-    // 2. Who was first seen when, kept BEFORE the prune can take the rows that say so, in ranges of
-    //    batches whose own counts fit a chunk, the cursor moving past a range only once it is in.
-    const kept = await firsts(db, meter, read, QUERY_BUDGET - QUERY_RESERVE);
+    // 1. Who was first seen when, kept BEFORE the prune can take the rows that say so: a couple of
+    //    hundred batches a statement, the cursor moving past a range only once that range is in. It
+    //    goes first because it is the cheap half and must not wait behind statements a D1 window
+    //    saturated by the roll-up will refuse -- and because, bounded and wrapped, it can no longer
+    //    take the night's roll-up with it: the one statement it was did, night after night, until
+    //    2026-11-06.
+    const kept = await firsts(db, meter, read, QUERY_BUDGET - QUERY_RESERVE - ACTOR_MIN_QUERIES);
+    // 2. The finished days after the cursor. The same bounded roll-up the hourly runs make, so a
+    //    backlog drains an hour at a time instead of waiting for a night that may not finish it.
+    const rolled = await rollUpDays(db, meter, read, QUERY_BUDGET - QUERY_RESERVE);
     // 3. Past the age window, oldest first, in chunks.
     let deleted = 0;
     while (meter.queries < QUERY_BUDGET) {

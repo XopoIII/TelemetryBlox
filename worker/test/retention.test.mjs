@@ -312,8 +312,8 @@ test("a first-seen step that will not fit says so and leaves the roll-up done", 
 		},
 	};
 	const body = (await call(refusing, "/retention")).body;
-	// Five widths tried: a quarter of a million events, a fifth of that each time, down to a thousand.
-	assert.equal(refusals, 5);
+	// Four widths tried: two hundred batches, a fifth of that each time, down to one.
+	assert.equal(refusals, 4);
 	assert.equal(body.newActors, 0);
 	assert.deepEqual(body.firstsFailed, { batch: 1, error: "D1_ERROR: D1 DB is overloaded" });
 	// The night's work stands: the roll-up is not lost with the step that could not run.
