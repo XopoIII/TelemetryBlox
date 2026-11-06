@@ -18,9 +18,9 @@ TelemetryBlox is two things in one repository:
 It was built and used inside a live game before it became a package, and holds nothing of any
 game: every event name, endpoint, secret's name, alert rule and threshold is handed in.
 
-> **Status: 0.9.0.** The pipe's rules and Roblox's analytics are proven by 120 specs that run off
+> **Status: 0.9.1.** The pipe's rules and Roblox's analytics are proven by 120 specs that run off
 > Roblox on LuneBlox, and each of 229 small slips in the code makes the suite fail
-> (`tests/Mutate.luau`). The Worker's 112
+> (`tests/Mutate.luau`). The Worker's 114
 > tests run against Node's own SQLite, which D1 is, and a smoke gate serves the built Worker in
 > local `workerd`. **The engine adapter has not run in a Roblox server here:**
 > `src/RobloxServices.luau`, which posts the batches and makes the `AnalyticsService` calls, is
@@ -36,7 +36,7 @@ or pin it exactly in `pesde.toml`:
 
 ```toml
 [dependencies]
-TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.9.0", target = "roblox_server" }
+TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.9.1", target = "roblox_server" }
 ```
 
 It has no dependencies. The experience needs **Allow HTTP Requests** on.
@@ -256,7 +256,7 @@ telemetry/
 		"deploy": "wrangler deploy"
 	},
 	"dependencies": {
-		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.9.0"
+		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.9.1"
 	},
 	"devDependencies": {
 		"wrangler": "4.147.0"

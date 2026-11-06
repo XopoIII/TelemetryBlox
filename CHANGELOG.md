@@ -4,6 +4,27 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.9.1 - 2026-11-06
+
+The pipe does not change (`src/` is 0.8.8's) and the schema is as 0.9.0 left it, so a game that
+moves to it deploys its Worker and applies no migration.
+
+### Fixed
+
+- **A backlog of days kills the night before it rolls anything up.** 0.9.0 kept who was first seen
+  by expanding every batch after its cursor in one statement, ahead of the roll-up and outside the
+  retry its slices have. On a database that had finished no night for days (2026-11-06: 10.7
+  million raw events and no day since 2026-11-01) D1 answered an internal error, the route
+  answered 500, and no day was ever rolled up: the job could not catch up, only fail again. The
+  step now goes in ranges of batches whose own event counts fit `ACTOR_EVENT_CHUNK` (250,000), one
+  committed range at a time, the cursor moving past a range only once that range is in; a range D1
+  will not expand retries at a fifth of the width, down to a thousand events, and a run that cannot
+  fit even that reports `firstsFailed` instead of dying. It runs **after** the roll-up now, with
+  its queries reserved from the roll-up's budget, so a step that will not fit can no longer take
+  the night's roll-up with it.
+- **The hourly run drains the first-seen step too.** `rollUp()` keeps the players of the batches
+  it rolls up, so neither a busy day nor a backlog is left for the night alone.
+
 ## 0.9.0 - 2026-11-06
 
 The pipe of 0.8.8, with one rule added (`src/Pipe.luau`): a 500-599 answer now waits like a rate

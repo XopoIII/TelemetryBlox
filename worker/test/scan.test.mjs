@@ -213,7 +213,12 @@ test("an hourly run scans and rolls the finished day up; the nightly run also pr
 	env.DB.raw.prepare("UPDATE batches SET received_at = ? WHERE id = 1").run(YESTERDAY + 60);
 	env.DB.raw.exec("INSERT INTO alert_state (key, sent_at, held, released) VALUES ('old', 1000, 0, 0)");
 	await cron(env, 14);
-	assert.deepEqual(rows(env, "SELECT batch_id FROM alert_cursor"), [{ batch_id: 1 }]);
+	// The hourly run now drains the first-seen step as well as the roll-up, so both cursors stand at
+	// the batch it read.
+	assert.deepEqual(rows(env, "SELECT name, batch_id FROM alert_cursor ORDER BY name"), [
+		{ name: "actors", batch_id: 1 },
+		{ name: "anomaly", batch_id: 1 },
+	]);
 	// The finished day is rolled up hourly now, so a backlog drains through the day, not only at night.
 	assert.deepEqual(rows(env, "SELECT event, events, actors FROM events_daily ORDER BY event"), [
 		{ event: "*", events: 2, actors: 2 },

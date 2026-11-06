@@ -65,7 +65,40 @@ export interface RollUp {
         from: string;
         error: string;
     };
+    /** The first-seen step, which every run drains alongside the roll-up. */
+    firsts?: Firsts;
 }
+/** The rows D1 says the run's big statements read, an expanded event counting once each. */
+type Read = (res: {
+    meta?: {
+        rows_read?: number;
+    };
+}) => void;
+interface Meter {
+    queries: number;
+    rowsRead: number;
+}
+/** How far the first-seen step got, and the range it would not take. */
+export interface Firsts {
+    /** New players kept this run. */
+    newActors: number;
+    /** The batch id the cursor stands at: everything at or before it is kept. */
+    to: number;
+    /** The range that would not go in, even a thousand events at a time. */
+    failed?: {
+        batch: number;
+        error: string;
+    };
+}
+/**
+ * Who was first seen when, kept BEFORE the prune can take the rows that say so. The bare
+ * `place_version` beside MIN(t) is that oldest row's own (SQLite's rule for a lone MIN). A player
+ * already kept is ignored, so each costs one row written, once. The batches go in ranges whose own
+ * counts fit `chunk`, and the cursor moves past a range only once that range is in, so a run D1
+ * cuts off leaves the rest to the next. With no cursor yet (a new database, or one from before it),
+ * the window of the roll-up and the day before it.
+ */
+export declare function firsts(db: D1Database, meter: Meter, read: Read, ceiling: number, chunk?: number): Promise<Firsts>;
 /** The roll-up alone, as every hourly run does it: the backlog drains through the day, not only at night. */
 export declare function rollUp(config: Resolved, env: Env): Promise<RollUp>;
 export declare function retention(config: Resolved, env: Env): Promise<Record<string, unknown>>;
@@ -89,3 +122,4 @@ export declare function hourlyWall(config: Resolved, env: Env, used?: number): P
  * `batches` 0 and the rest null means nothing has ever arrived.
  */
 export declare function freshness(config: Resolved, env: Env): Promise<Record<string, unknown>>;
+export {};

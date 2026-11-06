@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 import { createWorker } from "../dist/index.js";
-import { EXACT_MAX_EVENTS } from "../dist/retention.js";
+import { EXACT_MAX_EVENTS, firsts } from "../dist/retention.js";
 import { CONFIG, call, DAY, environment, NOW, recordTelegram, rows, texts } from "./helpers.mjs";
 
 const HOUR = 3600;
@@ -227,7 +227,7 @@ test("a day that will not go in one statement is rolled up in slices, its per-ev
 	]);
 });
 
-test("the size wall leaves a batch who was first seen has not read", async () => {
+test("the size wall takes a batch only after its player is kept", async () => {
 	const tiny = createWorker({ ...CONFIG, maxRawEvents: 1 });
 	const env = environment();
 	const yesterday = TODAY - DAY;
@@ -237,11 +237,90 @@ test("the size wall leaves a batch who was first seen has not read", async () =>
 	]);
 	await call(env, "/retention", { handler: tiny });
 	assert.equal(rows(env, "SELECT COUNT(*) AS n FROM batches")[0].n, 0);
-	// Received yesterday but stored after the night's cursor: its player is not kept yet.
+	// Rows that arrive after the night's cursor: the next run reads them before the wall may take
+	// them, so their players survive the pruning that follows.
 	store(env, yesterday + 9 * HOUR, [[yesterday + 9 * HOUR, "join", "u_late"]]);
 	store(env, yesterday + 10 * HOUR, [[yesterday + 10 * HOUR, "join", "u_later"]]);
 	await cron(env, 12, tiny);
-	assert.equal(rows(env, "SELECT COUNT(*) AS n FROM batches")[0].n, 2);
+	assert.equal(rows(env, "SELECT COUNT(*) AS n FROM batches")[0].n, 0);
+	assert.deepEqual(rows(env, "SELECT actor FROM actors ORDER BY actor"), [
+		{ actor: "u_a" },
+		{ actor: "u_late" },
+		{ actor: "u_later" },
+	]);
+});
+
+test("the first-seen step takes the backlog a range of batches at a time", async () => {
+	const env = environment();
+	const yesterday = TODAY - DAY;
+	store(env, yesterday + 2 * HOUR, [[yesterday + 2 * HOUR, "join", "u_a"]]);
+	store(env, yesterday + 3 * HOUR, [[yesterday + 3 * HOUR, "join", "u_b"]]);
+	store(env, yesterday + 4 * HOUR, [[yesterday + 4 * HOUR, "join", "u_c"]]);
+	// A chunk of one event, so each range is one batch: the backlog goes in a statement a batch,
+	// not one statement over every batch there is. The cursor says how far each one got.
+	const base = env.DB;
+	let statements = 0;
+	const counted = {
+		...env,
+		DB: {
+			raw: base.raw,
+			prepare: (sql) => {
+				if (sql.includes("INTO actors")) statements++;
+				return base.prepare(sql);
+			},
+		},
+	};
+	const meter = { queries: 0, rowsRead: 0 };
+	const read = (res) => {
+		meter.rowsRead += res.meta?.rows_read ?? 0;
+	};
+	const kept = await firsts(counted.DB, meter, read, 40, 1);
+	assert.deepEqual(kept, { newActors: 3, to: 3 });
+	assert.equal(statements, 3);
+	assert.deepEqual(rows(env, "SELECT actor FROM actors ORDER BY actor"), [
+		{ actor: "u_a" },
+		{ actor: "u_b" },
+		{ actor: "u_c" },
+	]);
+	// Past the cursor there is nothing left to read.
+	assert.deepEqual(await firsts(env.DB, meter, read, 40, 1), { newActors: 0, to: 3 });
+});
+
+test("a first-seen step that will not fit says so and leaves the roll-up done", async () => {
+	const env = environment();
+	const yesterday = TODAY - DAY;
+	store(env, yesterday + 2 * HOUR, [[yesterday + 2 * HOUR, "feed", "u_a"]]);
+	// D1 refuses every statement that would expand events into players, as it did for days.
+	const base = env.DB;
+	let refusals = 0;
+	const refusing = {
+		...env,
+		DB: {
+			raw: base.raw,
+			prepare: (sql) => {
+				const statement = base.prepare(sql);
+				if (!sql.includes("INTO actors")) return statement;
+				return {
+					bind: () => ({
+						run: async () => {
+							refusals++;
+							throw new Error("D1_ERROR: D1 DB is overloaded");
+						},
+					}),
+				};
+			},
+		},
+	};
+	const body = (await call(refusing, "/retention")).body;
+	// Five widths tried: a quarter of a million events, a fifth of that each time, down to a thousand.
+	assert.equal(refusals, 5);
+	assert.equal(body.newActors, 0);
+	assert.deepEqual(body.firstsFailed, { batch: 1, error: "D1_ERROR: D1 DB is overloaded" });
+	// The night's work stands: the roll-up is not lost with the step that could not run.
+	assert.deepEqual(rows(env, "SELECT event, events, actors FROM events_daily ORDER BY event"), [
+		{ event: "*", events: 1, actors: 1 },
+		{ event: "feed", events: 1, actors: 1 },
+	]);
 });
 
 test("an hourly run prunes past the budget what the night has rolled up", async () => {
@@ -250,11 +329,13 @@ test("an hourly run prunes past the budget what the night has rolled up", async 
 	const yesterday = TODAY - DAY;
 	store(env, yesterday + 6 * HOUR, [[yesterday + 6 * HOUR, "join", "u_a"]]);
 	await call(env, "/retention", { handler: createWorker({ ...CONFIG, maxRawEvents: 100 }) });
-	// After the night, today's rows come in and the budget is passed.
-	store(env, NOW - 2 * HOUR, [[NOW - 2 * HOUR, "join", "u_b"]]);
-	store(env, NOW - HOUR, [[NOW - HOUR, "join", "u_c"]]);
+	// After the night, today's rows come in and the budget is passed. They are placed INSIDE today:
+	// the wall keeps the day being collected, and an hour before midnight is still an hour back.
+	const today = Math.floor(NOW / DAY) * DAY;
+	store(env, today + 2 * HOUR, [[today + 2 * HOUR, "join", "u_b"]]);
+	store(env, today + 3 * HOUR, [[today + 3 * HOUR, "join", "u_c"]]);
 	// Not the night's hour: the roll-up does not run, the wall does, and takes the rolled-up batch.
-	// The cursor stands at the night's last batch, so today's two stay whatever the budget.
+	// The first-seen step keeps up in the same run, so the wall may take it; today's two it may not.
 	await cron(env, 12, tiny);
 	assert.deepEqual(rows(env, "SELECT n FROM batches ORDER BY id"), [{ n: 1 }, { n: 1 }]);
 	assert.equal(rows(env, "SELECT COUNT(*) AS n FROM events_daily WHERE event = '*'")[0].n, 1);
