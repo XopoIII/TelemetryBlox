@@ -236,6 +236,8 @@ async function rollUpDays(db, meter, read, ceiling = QUERY_BUDGET - QUERY_RESERV
     // millions of rows for nothing (2026-11-02: 2.5 million a run, the cursor standing still).
     const proved = Math.floor(state?.width ?? 0);
     let widthStep = proved >= 0 && proved < SLICE_WIDTHS.length ? proved : 0;
+    // What the database itself has been told about the width.
+    let storedWidth = state?.width == null ? -1 : widthStep;
     let slices = 0;
     let rolledUp = 0;
     const sliced = [];
@@ -341,18 +343,23 @@ async function rollUpDays(db, meter, read, ceiling = QUERY_BUDGET - QUERY_RESERV
             break;
         const at = day + slice;
         const width = Math.min(ladder, day + DAY_SECONDS - at);
-        if (meter.queries + 3 > ceiling)
+        if (meter.queries + 4 > ceiling)
             break;
+        // The narrower width is kept BEFORE the statement: a refusal means the ten-second window is
+        // spent by it, and a cursor write made after it is refused too (2026-11-06: the width never
+        // reached the database, and every run tried the same six hours again). Written first, the
+        // budget for it is there, and a run cut off mid-statement still leaves the next a step down.
+        const narrower = Math.min(widthStep + 1, SLICE_WIDTHS.length - 1);
+        if (narrower !== storedWidth) {
+            await attempt(() => db.prepare(SAVE_WIDTH).bind(narrower));
+            meter.queries++;
+            storedWidth = narrower;
+        }
         const result = await attempt(() => db.prepare(SLICE).bind(at, at + width, text));
         meter.queries++;
         if (result instanceof Error) {
             failed = { day: text, from: new Date(at * 1000).toISOString(), error: result.message };
-            const narrower = Math.min(widthStep + 1, SLICE_WIDTHS.length - 1);
-            if (narrower !== widthStep) {
-                widthStep = narrower;
-                await attempt(() => db.prepare(SAVE_WIDTH).bind(narrower));
-                meter.queries++;
-            }
+            widthStep = narrower;
             break;
         }
         read(result);
@@ -367,6 +374,14 @@ async function rollUpDays(db, meter, read, ceiling = QUERY_BUDGET - QUERY_RESERV
         }
         slice += width;
         slices++;
+        if (widthStep !== storedWidth) {
+            // The width that fitted, kept for the next run. A refusal here costs nothing: the cursor
+            // is already committed and the stored width is merely a step too narrow.
+            const back = await attempt(() => db.prepare(SAVE_WIDTH).bind(widthStep));
+            meter.queries++;
+            if (!(back instanceof Error))
+                storedWidth = widthStep;
+        }
     }
     return {
         rolledUp,

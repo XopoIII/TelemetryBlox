@@ -409,6 +409,58 @@ test("a night cut off inside a day resumes at the next slice without counting an
 	assert.deepEqual(rows(env, "SELECT value FROM retention_state WHERE name = 'rollup_width'"), [{ value: 0 }]);
 });
 
+test("the narrower width is kept before the statement D1 may refuse", async () => {
+	const env = environment();
+	const yesterday = TODAY - DAY;
+	store(env, yesterday + 2 * HOUR, [[yesterday + 2 * HOUR, "feed", "u_a"]]);
+	store(env, yesterday + 8 * HOUR, [[yesterday + 8 * HOUR, "join", "u_b"]]);
+	bulk(env, yesterday + 3 * HOUR);
+	// Once the six-hour statement is refused, the database refuses every later write -- the window
+	// is spent, as it was on 2026-11-06. The width must already be in the database by then.
+	const base = env.DB;
+	let refused = false;
+	const spent = {
+		...env,
+		DB: {
+			raw: base.raw,
+			prepare: (sql) => {
+				const statement = base.prepare(sql);
+				if (sql.includes("INTO events_slice")) {
+					return {
+						bind: (...args) =>
+							args[0] === yesterday + 6 * HOUR
+								? {
+										run: async () => {
+											refused = true;
+											throw new Error("D1_ERROR: D1 DB is overloaded");
+										},
+									}
+								: statement.bind(...args),
+					};
+				}
+				if (refused && sql.includes("rollup_width")) {
+					return {
+						bind: () => ({
+							run: async () => {
+								throw new Error("D1_ERROR: D1 DB is overloaded");
+							},
+						}),
+					};
+				}
+				return statement;
+			},
+		},
+	};
+	const cut = (await call(spent, "/retention")).body;
+	assert.ok(cut.failed, "the run says where it stopped");
+	// The width was written while the window still had room, so a spent window cannot lose it.
+	assert.deepEqual(rows(env, "SELECT value FROM retention_state WHERE name = 'rollup_width'"), [{ value: 1 }]);
+	// And the next run, on a database that is well again, starts a step narrower and moves on.
+	const again = (await call(env, "/retention")).body;
+	assert.deepEqual(again.sliced, [day(yesterday)]);
+	assert.equal(again.failed, undefined);
+});
+
 test("re-running a day's slices replaces its rows instead of adding to them", async () => {
 	const env = environment();
 	const yesterday = TODAY - DAY;

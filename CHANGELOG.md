@@ -4,6 +4,20 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.9.5 - 2026-11-06
+
+The pipe does not change (`src/` is 0.8.8's), the schema is as 0.9.0 left it, and no migration is
+needed; a game that moves to it deploys its Worker.
+
+### Fixed
+
+- **The narrower slice width is written before the statement that may be refused, not after it.**
+  0.9.4 stopped a run on a refused slice and kept the next width for the next run — but it kept it
+  after the refusal, and a write in a spent ten-second window is refused too, so the width never
+  reached the database and every run tried the same six hours again. The next width is now written
+  before the slice statement, while the window has room, and the width that fitted is written back
+  after a successful slice. A run cut off mid-statement still leaves the next run a step down.
+
 ## 0.9.4 - 2026-11-06
 
 The pipe does not change (`src/` is 0.8.8's), the schema is as 0.9.0 left it, and no migration is
