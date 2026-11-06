@@ -4,6 +4,47 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.9.0 - 2026-11-06
+
+The pipe of 0.8.8, with one rule added (`src/Pipe.luau`): a 500-599 answer now waits like a rate
+limit, and a dropped batch says in `reason` what the ingest answered, so a game that moves to it
+moves `src/` too. The wire is as it was (`schemaVersion` 1). The Worker and the schema change, so
+a game that moves to it deploys its Worker and applies the migrations.
+
+### Fixed
+
+- **The nightly roll-up stopped on a viral day, and the database filled behind it.** On 2026-11-02
+  a game's roll-up found its work by expanding every batch kept, and after a day of 3.5 million
+  events it left nothing behind: no `events_daily` row, no report, no cursor. The next night had
+  the backlog plus a night, died the same way, and by 2026-11-06 the database held 10.7 million raw
+  events and no day since 1 November. The roll-up now keeps its place in `retention_state`
+  (migration `0004_roll_up_progress.sql`): days walk forward from the cursor to yesterday UTC, a
+  day too big for one statement is collected into `events_slice` six hours at a time with
+  `INSERT OR REPLACE`, and the cursor moves only past a committed slice, so a run D1 cuts off
+  resumes where it stopped and no batch is read or counted twice. A slice that fails retries at
+  half its width (six hours, three, one, fifteen minutes); when even fifteen minutes fails the run
+  stops, says which slice, and leaves the cursor there. A day at or under `EXACT_MAX_EVENTS`
+  (500,000) still goes in one exact statement, players and all; a bigger day's events are exact and
+  its '*' players are counted once at its end, best effort.
+- **The hour that finds the backlog rolls it up too.** The hourly job now rolls up before it
+  applies the size wall, so a backlog drains through the day and not only at night.
+- **A batch is never pruned before the roll-up has read the day it can hold.** The size wall counts
+  its horizon from the roll-up's cursor, not from the newest day rolled up: it takes a batch only
+  once the cursor is past every day the batch could belong to (an hour of clock slack either way).
+- **A database overloaded for ten seconds is told from one at its size wall.** The ingest answers
+  `503 {"error":"overloaded"}` with `Retry-After: 10` for D1's "overloaded", "too many resources
+  consumed" and "CPU time limit" errors. A storage wall is still 507 `storage_full`, and any other
+  fault is 500 — the pipe used to see one kind of failure for all three.
+
+### Changed
+
+- **The pipe waits on a server that asks for time, not only on 429.** A 500-599 answer is a wait
+  (up to `MAX_WAITS`, then it costs the try and the batch is dropped), because a database
+  overloaded for ten seconds is not a batch to give up on.
+- **A dropped batch carries the reason it was dropped.** `reportDrops` now adds `reason`, the
+  last failed post's status ("http 503") or nothing when the post itself failed to leave, so a
+  `telemetry_drop` alert can say what happened instead of only that something did.
+
 ## 0.8.8 - 2026-10-31
 
 The pipe of 0.8.7: `src/` does not change, the wire and the schema are as they were, so a game that

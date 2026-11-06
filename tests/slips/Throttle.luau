@@ -1,31 +1,37 @@
 --!strict
---- Mutants of the pipe's answer to a 429: each a small slip, and the rule it breaks.
+--- Mutants of the pipe's answer to a 429 or a 5xx: each a small slip, and the rule it breaks.
 --- Every `from` must occur exactly once in its file.
 const Mutant = require("./Mutant")
 
 const MUTANTS: { Mutant.Mutant } = {
 	{
 		file = "src/Pipe.luau",
-		from = "if status == Pipe.TOO_MANY_REQUESTS and waits < Pipe.MAX_WAITS then",
+		from = "if askingForTime(status) and waits < Pipe.MAX_WAITS then",
 		to = "if false then",
-		breaks = "a 429 does not cost a try",
+		breaks = "an answer asking for time does not cost a try",
 	},
 	{
 		file = "src/Pipe.luau",
-		from = "if status == Pipe.TOO_MANY_REQUESTS and waits < Pipe.MAX_WAITS then",
+		from = "if askingForTime(status) and waits < Pipe.MAX_WAITS then",
+		to = "if status == Pipe.TOO_MANY_REQUESTS and waits < Pipe.MAX_WAITS then",
+		breaks = "a 5xx waits like a 429, not only a 429",
+	},
+	{
+		file = "src/Pipe.luau",
+		from = "if askingForTime(status) and waits < Pipe.MAX_WAITS then",
 		to = "if status ~= nil and waits < Pipe.MAX_WAITS then",
-		breaks = "only a 429 waits: any other refusal costs a try",
+		breaks = "only a 429 or a 5xx waits: a 4xx costs a try",
 	},
 	{
 		file = "src/Pipe.luau",
-		from = "if status == Pipe.TOO_MANY_REQUESTS and waits < Pipe.MAX_WAITS then",
-		to = "if status == Pipe.TOO_MANY_REQUESTS then",
+		from = "if askingForTime(status) and waits < Pipe.MAX_WAITS then",
+		to = "if askingForTime(status) then",
 		breaks = "the waits of one batch are bounded",
 	},
 	{
 		file = "src/Pipe.luau",
-		from = "if status == Pipe.TOO_MANY_REQUESTS and waits < Pipe.MAX_WAITS then",
-		to = "if status == Pipe.TOO_MANY_REQUESTS and waits <= Pipe.MAX_WAITS then",
+		from = "if askingForTime(status) and waits < Pipe.MAX_WAITS then",
+		to = "if askingForTime(status) and waits <= Pipe.MAX_WAITS then",
 		breaks = "a batch waits ten posts, not eleven",
 	},
 	{
@@ -63,6 +69,18 @@ const MUTANTS: { Mutant.Mutant } = {
 		from = "return false, `http {result.StatusCode}`, result.StatusCode",
 		to = "return false, `http {result.StatusCode}`, nil",
 		breaks = "the status of a refusal reaches the rule",
+	},
+	{
+		file = "src/Pipe.luau",
+		from = "\t\t\t\treason = lastReason,\n",
+		to = "",
+		breaks = "a loss names why the last post failed",
+	},
+	{
+		file = "src/Pipe.luau",
+		from = "\t\t\tlastReason = nil\n",
+		to = "",
+		breaks = "a post the ingest takes clears the remembered reason",
 	},
 }
 

@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, test } from "node:test";
 import { createWorker } from "../dist/index.js";
+import { EXACT_MAX_EVENTS } from "../dist/retention.js";
 import { CONFIG, call, DAY, environment, NOW, recordTelegram, rows, texts } from "./helpers.mjs";
 
 const HOUR = 3600;
@@ -36,6 +37,19 @@ function rolled(env, t, events) {
 			"INSERT INTO events_daily (day, event, env, universe_id, events, actors) VALUES (?, '*', 'live', 'u1', ?, 1)",
 		)
 		.run(day(t), events);
+}
+
+/**
+ * A batch whose own count says its day is over the exact statement's limit, so the day is sliced.
+ * Its events are empty: the slices count what the real batches hold.
+ */
+function bulk(env, received, n = EXACT_MAX_EVENTS + 1) {
+	env.DB.raw
+		.prepare(
+			`INSERT INTO batches (received_at, env, schema_version, universe_id, place_id, place_version, job_id,
+			 server_start, first_seq, last_seq, n, events) VALUES (?, 'live', 1, 'u1', 'p1', 7, ?, 1, 1, 1, ?, '[]')`,
+		)
+		.run(received, `job-bulk-${received}`, n);
 }
 
 /** The D1 binding with each statement that expands events reporting `perExpansion` rows read. */
@@ -107,14 +121,16 @@ test("after the cursor, who was first seen is read from the batches since the la
 
 test("a night expands the batches twice, and warns past nightlyReadWarn", async () => {
 	const quiet = reading(environment(), 1000);
-	store(quiet, NOW - DAY, [[NOW - DAY, "join", "u_a"]]);
+	// Noon yesterday: a batch received just after midnight can hold the day before as well, and the
+	// night would then read two days of statements instead of one.
+	store(quiet, TODAY - 12 * HOUR, [[TODAY - 12 * HOUR, "join", "u_a"]]);
 	const report = (await call(quiet, "/retention")).body;
 	assert.equal(report.rowsRead, 2000);
 	assert.equal(texts().length, 0);
 
 	const handler = createWorker({ ...CONFIG, nightlyReadWarn: 1500 });
 	const loud = reading(environment(), 1000);
-	store(loud, NOW - DAY, [[NOW - DAY, "join", "u_a"]]);
+	store(loud, TODAY - 12 * HOUR, [[TODAY - 12 * HOUR, "join", "u_a"]]);
 	await call(loud, "/retention", { handler });
 	assert.deepEqual(texts(), ["[warning] Example Game: the nightly job read 2000 rows of D1 (warned past 1500)"]);
 });
@@ -178,7 +194,7 @@ test("the size wall never takes the day being collected, and says so once a nigh
 	]);
 });
 
-test("a day that will not go in one statement is rolled up in slices, its players left unknown", async () => {
+test("a day that will not go in one statement is rolled up in slices, its per-event players left unknown", async () => {
 	const env = environment();
 	const yesterday = TODAY - DAY + HOUR;
 	store(env, yesterday, [
@@ -204,7 +220,9 @@ test("a day that will not go in one statement is rolled up in slices, its player
 		`SELECT event, events, actors FROM events_daily WHERE day = '${day(yesterday)}' ORDER BY event`,
 	).map((r) => ({ ...r }));
 	assert.deepEqual(kept, [
-		{ event: "*", events: 2, actors: null },
+		// The day's players are counted once more when its last slice lands; the per-event rows stay
+		// unknown, as a slice's distinct set is not a day's.
+		{ event: "*", events: 2, actors: 2 },
 		{ event: "feed", events: 2, actors: null },
 	]);
 });
@@ -240,4 +258,99 @@ test("an hourly run prunes past the budget what the night has rolled up", async 
 	await cron(env, 12, tiny);
 	assert.deepEqual(rows(env, "SELECT n FROM batches ORDER BY id"), [{ n: 1 }, { n: 1 }]);
 	assert.equal(rows(env, "SELECT COUNT(*) AS n FROM events_daily WHERE event = '*'")[0].n, 1);
+});
+
+test("a night cut off inside a day resumes at the next slice without counting anything twice", async () => {
+	const env = environment();
+	const yesterday = TODAY - DAY;
+	store(env, yesterday + 2 * HOUR, [[yesterday + 2 * HOUR, "feed", "u_a"]]);
+	store(env, yesterday + 8 * HOUR, [[yesterday + 8 * HOUR, "join", "u_b"]]);
+	// The day's own count says it is too big for one statement: six-hour slices it is.
+	bulk(env, yesterday + 3 * HOUR);
+	// D1 refuses the six-hour, three-hour, one-hour and fifteen-minute statements of the second
+	// slice: the run must stop with the cursor before it, not walk over a hole.
+	const base = env.DB;
+	let failures = 0;
+	const flaky = {
+		...env,
+		DB: {
+			raw: base.raw,
+			prepare: (sql) => {
+				const statement = base.prepare(sql);
+				if (!sql.includes("INTO events_slice")) return statement;
+				return {
+					bind: (...args) =>
+						args[0] === yesterday + 6 * HOUR && failures < 4
+							? {
+									run: async () => {
+										failures++;
+										throw new Error("D1_ERROR: D1 DB is overloaded");
+									},
+								}
+							: statement.bind(...args),
+				};
+			},
+		},
+	};
+	const cut = (await call(flaky, "/retention")).body;
+	assert.ok(cut.failed, "the run says where it stopped");
+	assert.equal(cut.failed.day, day(yesterday));
+	assert.equal(cut.failed.from, new Date((yesterday + 6 * HOUR) * 1000).toISOString());
+	assert.deepEqual(cut.state, { day: day(yesterday), slice: 6 * HOUR });
+	assert.deepEqual(cut.sliced, []);
+	// The first six hours are in, and committed: they are not read again.
+	assert.deepEqual(rows(env, "SELECT day, slice_from, event, events FROM events_slice"), [
+		{ day: day(yesterday), slice_from: yesterday, event: "feed", events: 1 },
+	]);
+	assert.equal(rows(env, "SELECT COUNT(*) AS n FROM events_daily")[0].n, 0);
+
+	// The next run picks the day up at the slice the first one could not write; its slices REPLACE
+	// their own rows, so nothing is counted twice.
+	const again = (await call(env, "/retention")).body;
+	assert.deepEqual(again.sliced, [day(yesterday)]);
+	assert.equal(again.failed, undefined);
+	assert.deepEqual(again.state, { day: day(TODAY), slice: 0 });
+	assert.deepEqual(
+		rows(env, `SELECT event, events, actors FROM events_daily WHERE day = '${day(yesterday)}' ORDER BY event`),
+		[
+			{ event: "*", events: 2, actors: 2 },
+			{ event: "feed", events: 1, actors: null },
+			{ event: "join", events: 1, actors: null },
+		],
+	);
+	assert.equal(rows(env, "SELECT COUNT(*) AS n FROM events_slice")[0].n, 0);
+});
+
+test("re-running a day's slices replaces its rows instead of adding to them", async () => {
+	const env = environment();
+	const yesterday = TODAY - DAY;
+	store(env, yesterday + 2 * HOUR, [[yesterday + 2 * HOUR, "feed", "u_a"]]);
+	store(env, yesterday + 8 * HOUR, [[yesterday + 8 * HOUR, "join", "u_b"]]);
+	bulk(env, yesterday + 3 * HOUR);
+	assert.deepEqual((await call(env, "/retention")).body.sliced, [day(yesterday)]);
+	const settled = rows(env, "SELECT day, event, events, actors FROM events_daily ORDER BY event");
+	// The cursor put back where the night began, as a run killed before its last state write would
+	// leave it: every slice is written again over its own rows, and no number doubles.
+	env.DB.raw
+		.prepare("INSERT OR REPLACE INTO retention_state (name, value) VALUES ('rollup_day', ?), ('rollup_slice', 0)")
+		.run(yesterday);
+	await call(env, "/retention");
+	assert.deepEqual(rows(env, "SELECT day, event, events, actors FROM events_daily ORDER BY event"), settled);
+	assert.equal(rows(env, "SELECT COUNT(*) AS n FROM events_slice")[0].n, 0);
+});
+
+test("a day no batch can hold is skipped, and the cursor moves past it", async () => {
+	const env = environment();
+	const settled = TODAY - 2 * DAY;
+	rolled(env, settled, 1);
+	// No batch at all: nothing can hold the day between the settled one and today.
+	const report = (await call(env, "/retention")).body;
+	assert.deepEqual(report.skipped, [day(TODAY - DAY)]);
+	assert.deepEqual(rows(env, "SELECT day, event, events FROM events_daily"), [
+		{ day: day(settled), event: "*", events: 1 },
+	]);
+	assert.deepEqual(rows(env, "SELECT name, value FROM retention_state ORDER BY name"), [
+		{ name: "rollup_day", value: TODAY },
+		{ name: "rollup_slice", value: 0 },
+	]);
 });

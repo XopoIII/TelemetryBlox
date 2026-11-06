@@ -28,7 +28,7 @@ import { alertsFor, deliver, pruneAlertState, send } from "./alerts.js";
 import { announce, announcementOf } from "./announce.js";
 import { resolve, secret } from "./config.js";
 import { asText, authorised, createLimiter, ingest, json, secretsMatch } from "./ingest.js";
-import { freshness, hourlyWall, retention } from "./retention.js";
+import { freshness, hourlyWall, retention, rollUp } from "./retention.js";
 import { robloxKind, robloxWebhookText } from "./roblox.js";
 import { anomalies, digest, silent } from "./scan.js";
 export { ANNOUNCE_TEXT, ANNOUNCE_TITLE } from "./announce.js";
@@ -47,7 +47,8 @@ export function createKit(given) {
         digest: (env) => digest(config, env),
         silent: (env) => silent(config, env),
         retention: (env) => retention(config, env),
-        hourlyWall: (env) => hourlyWall(config, env),
+        rollUp: (env) => rollUp(config, env),
+        hourlyWall: (env, used) => hourlyWall(config, env, used),
         isNightly: (scheduledTime) => new Date(scheduledTime).getUTCHours() === config.nightlyHourUtc,
         robloxWebhookText: (body) => robloxWebhookText(config, body),
         robloxWebhookChannel: (body) => config.robloxChannel(robloxKind(body)),
@@ -127,9 +128,12 @@ export function createWorker(given) {
             // A pipe that is silent sends no row to say so: the watchdog asks the table itself.
             const watchdog = kit.silent(env).catch(logged("silent_failed"));
             if (!kit.isNightly(event.scheduledTime)) {
-                // A day's rows past the budget go before the night, so D1 never holds two days of them.
+                // The finished days move forward every hour, not only at night, so a backlog a night
+                // could not finish drains through the day; then a day's rows past the budget go before
+                // the night, so D1 never holds two days of them. Both share the run's query budget.
                 ctx.waitUntil(Promise.all([hourly, watchdog])
-                    .then(() => kit.hourlyWall(env))
+                    .then(() => kit.rollUp(env))
+                    .then((rolled) => kit.hourlyWall(env, rolled.queries))
                     .catch(logged("size_wall_failed")));
                 return;
             }

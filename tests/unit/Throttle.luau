@@ -1,6 +1,6 @@
 --!strict
---- A 429: the ingest asking for time. The batch is held without spending a try, for a bounded
---- number of posts, and it buys no post the pipe would not have made anyway.
+--- A 429 or a 5xx: the ingest asking for time. The batch is held without spending a try, for a
+--- bounded number of posts, and it buys no post the pipe would not have made anyway.
 const Pipe = require("@telemetryblox/Pipe")
 const Ring = require("@telemetryblox/Ring")
 const Spec = require("../Spec")
@@ -52,24 +52,26 @@ const function triesSaid(world: World.World): { number }
 	return out
 end
 
-Spec.test("a 429 holds the batch and costs no try, and any other refusal still costs one", function()
+Spec.test("a 429 or a 5xx holds the batch and costs no try, and a 4xx still costs one", function()
 	Spec.equal(Pipe.TOO_MANY_REQUESTS, 429, "the status")
 	const world, ring, pipe = setup()
-	world.answers = { 429, 429, 500, 429, 503, 500 }
+	world.answers = { 429, 500, 503, 400, 400, 400 }
 	ring.emit("purchase", "u_a", { robux = 25 })
 	ring.emit("feed", "u_a", {})
-	Spec.equal(pipe.flushOnce(), false, "asked to wait")
-	Spec.equal(pipe.backlog(), 2, "held")
-	Spec.equal(ring.dropped(), 0, "nothing lost")
+	for index = 1, 3 do
+		Spec.equal(pipe.flushOnce(), false, `asked to wait, post {index}`)
+		Spec.equal({ pipe.backlog(), ring.dropped() }, { 2, 0 }, `held after post {index}`)
+	end
 	Spec.equal(world.warnings, {
 		{ id = "telemetry.send_retry", context = { count = 2, try = 0, reason = "http 429" } },
-	}, "said in the log, with no try spent")
-	for index = 2, 5 do
-		Spec.equal(pipe.flushOnce(), false, `post {index}`)
+		{ id = "telemetry.send_retry", context = { count = 2, try = 0, reason = "http 500" } },
+		{ id = "telemetry.send_retry", context = { count = 2, try = 0, reason = "http 503" } },
+	}, "the 429 and the two 5xxs are said with no try spent")
+	for index = 4, 5 do
+		Spec.equal(pipe.flushOnce(), false, `a 4xx, post {index}`)
 	end
-	Spec.equal(triesSaid(world), { 0, 0, 1, 1, 2 }, "the two real refusals each cost a try, the three 429s none")
-	Spec.equal(pipe.backlog(), 2, "still held after five posts: under the old rule it was lost at the third")
-	Spec.equal(ring.dropped(), 0, "and nothing is lost yet")
+	Spec.equal(triesSaid(world), { 0, 0, 0, 1, 2 }, "the 4xxs cost a try each, the 429 and the 5xxs none")
+	Spec.equal(pipe.backlog(), 2, "still held before the last try")
 
 	-- The third real refusal is the last: maxTries is still three.
 	Spec.equal(pipe.flushOnce(), false, "post 6")
@@ -78,7 +80,7 @@ Spec.test("a 429 holds the batch and costs no try, and any other refusal still c
 	Spec.equal(pipe.backlog(), 0, "no longer held")
 	Spec.equal(world.warnings[6], {
 		id = "telemetry.send_failed",
-		context = { count = 2, dropped = 2, reason = "http 500" },
+		context = { count = 2, dropped = 2, reason = "http 400" },
 	}, "the loss, with its cause")
 	for index = 2, 6 do
 		Spec.equal(world.posts[index].envelope.events, world.posts[1].envelope.events, `the same batch, post {index}`)
@@ -100,17 +102,19 @@ Spec.test("a batch that waited is taken whole when the ingest has room again", f
 	Spec.equal(pipe.backlog(), 0, "nothing waits")
 end)
 
-Spec.test("with one try a 429 is still held, and the first real refusal loses the batch", function()
+Spec.test("with one try a 429 or a 5xx is still held, and the first 4xx loses the batch", function()
 	const world, ring, pipe = setup(function(settings: Pipe.Config)
 		settings.maxTries = 1
 	end)
-	world.answers = { 429, 500 }
+	world.answers = { 429, 500, 503, 400 }
 	ring.emit("feed", nil, {})
-	Spec.equal(pipe.flushOnce(), false, "asked to wait")
-	Spec.equal({ pipe.backlog(), ring.dropped() }, { 1, 0 }, "held, not lost")
+	for index = 1, 3 do
+		Spec.equal(pipe.flushOnce(), false, `asked to wait, post {index}`)
+		Spec.equal({ pipe.backlog(), ring.dropped() }, { 1, 0 }, `held after post {index}`)
+	end
 	Spec.equal(pipe.flushOnce(), false, "refused")
 	Spec.equal({ pipe.backlog(), ring.dropped() }, { 0, 1 }, "lost at once")
-	Spec.equal(world.warnings[2].id, "telemetry.send_failed", "said as a loss")
+	Spec.equal(world.warnings[4].id, "telemetry.send_failed", "said as a loss")
 end)
 
 Spec.test("an ingest that only ever says 429 holds a batch for ten posts, then three tries, and no longer", function()

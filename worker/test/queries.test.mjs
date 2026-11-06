@@ -76,6 +76,8 @@ test("the schema is every migration in order, and can be applied twice", () => {
 		"table alert_state",
 		"table batches",
 		"table events_daily",
+		"table events_slice",
+		"table retention_state",
 		"view events",
 		"view events_day",
 		"view events_week",
@@ -105,6 +107,10 @@ test("the example queries say the right numbers of a small launch", async () => 
 	await call(env, "/ingest", {
 		body: envelope({ jobId: "", env: "studio" }, [{ seq: 1, t: b, event: "join", actor: "u_dev", ctx: {} }]),
 	});
+	// A batch arrives within minutes of its rows, and the roll-up reads a batch only in the window
+	// around the day those rows belong to: let this one arrive as it would in life, beside the day
+	// it holds, rather than two days after it.
+	env.DB.raw.prepare("UPDATE batches SET received_at = ? WHERE job_id = 'job-a'").run(a);
 	await call(env, "/retention");
 	// The drop row is worth a warning to the example game; it went to the recorder, not the network.
 	assert.equal(texts().length, 1);

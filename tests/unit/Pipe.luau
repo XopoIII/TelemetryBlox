@@ -110,7 +110,7 @@ end)
 
 Spec.test("a refused batch is held and sent again as the same batch", function()
 	const world, ring, pipe = setup()
-	world.answers = { 503 }
+	world.answers = { 400 }
 	ring.emit("feed", "u_a", { n = 1 })
 	ring.emit("feed", "u_a", { n = 2 })
 	Spec.equal(pipe.flushOnce(), false, "refused")
@@ -118,7 +118,7 @@ Spec.test("a refused batch is held and sent again as the same batch", function()
 	Spec.equal(ring.size(), 0, "and not put back in the ring")
 	Spec.equal(ring.dropped(), 0, "nothing counted lost")
 	Spec.equal(world.warnings, {
-		{ id = "telemetry.send_retry", context = { count = 2, try = 1, reason = "http 503" } },
+		{ id = "telemetry.send_retry", context = { count = 2, try = 1, reason = "http 400" } },
 	}, "said in the log")
 
 	-- Rows written meanwhile wait their turn: the retry is the same rows and no others.
@@ -146,7 +146,7 @@ end)
 
 Spec.test("a batch refused three times is counted lost, and the loss is said with its cause", function()
 	const world, ring, pipe = setup()
-	world.answers = { 500, "raise", 401 }
+	world.answers = { 400, "raise", 401 }
 	ring.emit("feed", nil, {})
 	ring.emit("feed", nil, {})
 	Spec.equal(pipe.flushOnce(), false, "first")
@@ -159,7 +159,7 @@ Spec.test("a batch refused three times is counted lost, and the loss is said wit
 	Spec.equal(pipe.backlog(), 0, "no longer held")
 	Spec.equal(
 		world.warnings[1],
-		{ id = "telemetry.send_retry", context = { count = 2, try = 1, reason = "http 500" } },
+		{ id = "telemetry.send_retry", context = { count = 2, try = 1, reason = "http 400" } },
 		"1"
 	)
 	Spec.equal(world.warnings[2].id, "telemetry.send_retry", "2")
@@ -171,7 +171,7 @@ Spec.test("a batch refused three times is counted lost, and the loss is said wit
 
 	-- The count starts again for the next batch.
 	ring.emit("feed", nil, {})
-	world.answers[4] = 500
+	world.answers[4] = 400
 	Spec.equal(pipe.flushOnce(), false, "a new batch, its first try")
 	Spec.equal(world.warnings[4].context.try, 1, "tries start at one")
 end)
@@ -180,11 +180,42 @@ Spec.test("with one try a refused batch is lost at once", function()
 	const world, ring, pipe = setup(function(settings: Pipe.Config)
 		settings.maxTries = 1
 	end)
-	world.answers = { 500 }
+	world.answers = { 400 }
 	ring.emit("feed", nil, {})
 	Spec.equal(pipe.flushOnce(), false, "refused")
 	Spec.equal(ring.dropped(), 1, "lost")
 	Spec.equal(world.warnings[1].id, "telemetry.send_failed", "no retry said")
+end)
+
+Spec.test("a 503 or a 500 asks for time, and the loss after its waits names it", function()
+	const world, ring, pipe = setup(function(settings: Pipe.Config)
+		settings.maxTries = 1
+	end)
+	ring.emit("feed", nil, {})
+	for _, status in { 429, 500, 503 } do
+		table.insert(world.answers, status)
+		Spec.equal(pipe.flushOnce(), false, `http {status}`)
+		Spec.equal(world.warnings[#world.warnings].context.try, 0, "no try spent")
+		Spec.equal({ pipe.backlog(), ring.dropped() }, { 1, 0 }, "held, not lost")
+	end
+	-- The waits belong to the batch, and past MAX_WAITS it costs the one try it has.
+	for _ = 1, Pipe.MAX_WAITS - 3 do
+		table.insert(world.answers, 503)
+		pipe.flushOnce()
+	end
+	Spec.equal(world.warnings[Pipe.MAX_WAITS].context.try, 0, "ten waits, no try")
+	table.insert(world.answers, 503)
+	Spec.equal(pipe.flushOnce(), false, "the try, and the loss")
+	Spec.equal(ring.dropped(), 1, "lost with its only try")
+	pipe.reportDrops()
+	Spec.equal(ring.recent()[1].ctx.reason, "http 503", "the loss names the 503")
+
+	-- A post the ingest takes clears it: no loss afterwards names a reason that is not its own.
+	ring.emit("feed", nil, {})
+	Spec.equal(pipe.flushOnce(), true, "taken")
+	ring.addUnsent(1)
+	pipe.reportDrops()
+	Spec.equal(ring.recent()[1].ctx.reason, nil, "no stale reason")
 end)
 
 Spec.test("without the secret the batch still goes, with no key, and is seen refused", function()

@@ -16,11 +16,12 @@
 --- rows' own numbers), so a post that landed without its answer is ignored by the ingest rather than
 --- stored twice. After `maxTries` posts the batch is counted lost.
 ---
---- A 429 IS THE INGEST ASKING FOR TIME, not a refusal of the batch: its limiter is over a minute, and
---- the same batch is welcome in the next. So a 429 holds the batch without spending one of its tries,
---- for at most `MAX_WAITS` posts of one batch; past that a 429 costs a try like any other answer, so
---- an ingest that says nothing else cannot hold a batch for ever. It buys no extra request: a held
---- batch is posted once a wake, as it always was, and the drain still ends at its budget.
+--- A 429 OR A 5xx IS THE INGEST ASKING FOR TIME, not a refusal of the batch: its limiter is over a
+--- minute, or its database is full or overloaded, and the same batch is welcome in the next. So such
+--- an answer holds the batch without spending one of its tries, for at most `MAX_WAITS` posts of one
+--- batch; past that it costs a try like any other answer, so an ingest that says nothing else cannot
+--- hold a batch for ever. It buys no extra request: a held batch is posted once a wake, as it always
+--- was, and the drain still ends at its budget.
 ---
 --- THE FIRST WAKE IS STAGGERED. A publish or a surge starts many servers in the same second, and a
 --- fleet whose flushers wake together posts together for its whole life. The first wait is the job
@@ -42,13 +43,22 @@ Pipe.CLOSE_RETRY_SECONDS = 2
 Pipe.CLOSE_POLL_SECONDS = 0.25
 --> The status an ingest answers when batches arrive faster than it takes them.
 Pipe.TOO_MANY_REQUESTS = 429
---> Posts of one batch that may be answered 429 without costing it a try.
+--> Posts of one batch that may be answered 429 or a 5xx without costing it a try.
 Pipe.MAX_WAITS = 10
 
 --> Seconds before the flusher's first wake: the job id's hash within the tick, so servers that
 --> started together do not post together. Deterministic: the same server wakes at the same offset.
 function Pipe.stagger(jobId: string, tickSeconds: number): number
 	return Hash.str32(jobId) % math.max(1, math.floor(tickSeconds))
+end
+
+-- The ingest asking for time rather than refusing the batch: its limiter (429), or its database
+-- full or overloaded (5xx). Any other answer is the batch's fault and costs it a try.
+const function askingForTime(status: number?): boolean
+	if status == nil then
+		return false
+	end
+	return status == Pipe.TOO_MANY_REQUESTS or (status >= 500 and status < 600)
 end
 
 export type Config = {
@@ -98,6 +108,8 @@ function Pipe.new(config: Config, ring: Ring.Ring, services: Services.Services):
 	local held: { Ring.Row }? = nil
 	local tries = 0
 	local waits = 0
+	-- Why the last post failed, while the loss it caused is still unreported.
+	local lastReason: string? = nil
 	local posted = services.clock()
 
 	-- `jobId` is not decoration: Roblox's own logs are addressed per server job, so carrying it lets
@@ -161,14 +173,16 @@ function Pipe.new(config: Config, ring: Ring.Ring, services: Services.Services):
 		end
 		const sent, why, status = post(batch)
 		if sent then
+			lastReason = nil
 			waits = 0
 			held = nil
 			tries = 0
 			return true
 		end
-		-- Asked to wait: the batch is held with its tries as they were (`try` in the log is the
-		-- tries spent, so a batch that has only waited says 0).
-		if status == Pipe.TOO_MANY_REQUESTS and waits < Pipe.MAX_WAITS then
+		lastReason = why
+		-- Asked to wait (a 429 or a 5xx): the batch is held with its tries as they were (`try` in
+		-- the log is the tries spent, so a batch that has only waited says 0).
+		if askingForTime(status) and waits < Pipe.MAX_WAITS then
 			waits += 1
 		else
 			tries += 1
@@ -188,7 +202,8 @@ function Pipe.new(config: Config, ring: Ring.Ring, services: Services.Services):
 
 	-- The hole is reported INTO the stream: `overflow` (a full ring evicted them: the game's volume),
 	-- `send_failed` (the ingest never took their batch) and `refused` (turned away at the door), with
-	-- `count` for all three. A gap the data can see beats one it reads as "nothing happened".
+	-- `count` for all three and `reason`, the last failed post's answer, when there was one. A gap the
+	-- data can see beats one it reads as "nothing happened".
 	function self.reportDrops()
 		const evicted, unsent, refused = ring.claimDropped()
 		const count = evicted + unsent + refused
@@ -198,6 +213,7 @@ function Pipe.new(config: Config, ring: Ring.Ring, services: Services.Services):
 				overflow = evicted,
 				send_failed = unsent,
 				refused = refused,
+				reason = lastReason,
 			})
 		end
 	end

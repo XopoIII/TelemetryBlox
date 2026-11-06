@@ -20,7 +20,13 @@ import { type Env, type Resolved } from "./config.js";
 export declare const SCHEMA_VERSION = 1;
 /** Whether a D1 error is the database at its size limit (SQLite's SQLITE_FULL, D1's own words). */
 export declare function storageFull(error: unknown): boolean;
-export declare function json(body: unknown, status?: number): Response;
+/**
+ * Whether a D1 error is the database refusing work for a moment rather than for good: D1's own
+ * overload messages, and SQLite's CPU limit when a statement runs too long. The pipe waits on a 5xx
+ * without spending a try, so these get their own answer and their own short wait.
+ */
+export declare function overloaded(error: unknown): boolean;
+export declare function json(body: unknown, status?: number, headers?: Record<string, string>): Response;
 /**
  * Whether two secrets are the same, in constant time. A plain `===` leaks the key one byte at a time
  * to anyone who can measure the answer's delay. Both are hashed first, so the comparison is always

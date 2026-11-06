@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { createWorker } from "../dist/index.js";
 import { freshDatabase } from "../testing/index.mjs";
-import { call, DAY, envelope, environment, KEY, NOW, rows, stored, YESTERDAY } from "./helpers.mjs";
+import { call, DAY, envelope, environment, HOST, KEY, NOW, rows, stored, worker, YESTERDAY } from "./helpers.mjs";
 
 const one = (overrides = {}) => envelope(overrides, [{ seq: 1, t: YESTERDAY, event: "join", actor: "u_a", ctx: {} }]);
 
@@ -237,6 +237,9 @@ test("the nightly job rolls a finished day up per event and as a whole", async (
 			{ seq: 6, t: NOW, event: "join", actor: "u_c", ctx: {} },
 		]),
 	});
+	// The roll-up reads a batch only in the window around the day its rows are of, and a batch
+	// arrives with its rows in life: say so, rather than depend on the UTC hour the test runs at.
+	env.DB.raw.prepare("UPDATE batches SET received_at = ? WHERE id = 1").run(YESTERDAY + 30);
 	await call(env, "/retention");
 	assert.deepEqual(rows(env, "SELECT event, events, actors FROM events_daily ORDER BY event"), [
 		// The day as a whole: five events, two players. The per-event actors sum to three.
@@ -281,7 +284,7 @@ test("the days raw rows are kept are the game's to say", async () => {
 	assert.deepEqual((await pruned(year, 61)).left, ["old", "new"]);
 });
 
-test("a database at its size limit answers 507, and any other insert fault 500", async () => {
+test("a database at its size limit answers 507, an overloaded one 503, and any other insert fault 500", async () => {
 	const failing = (message) => {
 		const env = environment();
 		const db = env.DB;
@@ -294,6 +297,22 @@ test("a database at its size limit answers 507, and any other insert fault 500",
 	const full = await call(failing("D1_ERROR: database or disk is full: SQLITE_FULL"), "/ingest", { body: one() });
 	assert.equal(full.status, 507);
 	assert.deepEqual(full.body, { error: "storage_full" });
+	// An overloaded database is not a full one: the pipe waits ten seconds and posts the batch again.
+	for (const message of ["D1_ERROR: D1 DB is overloaded", "Too many resources consumed", "CPU time limit"]) {
+		const busy = await call(failing(message), "/ingest", { body: one() });
+		assert.equal(busy.status, 503);
+		assert.deepEqual(busy.body, { error: "overloaded" });
+	}
+	const response = await worker.fetch(
+		new Request(`${HOST}/ingest`, {
+			method: "POST",
+			headers: { "content-type": "application/json", "x-api-key": KEY },
+			body: JSON.stringify(one()),
+		}),
+		failing("D1_ERROR: D1 DB is overloaded"),
+	);
+	assert.equal(response.status, 503);
+	assert.equal(response.headers.get("retry-after"), "10");
 	const other = await call(failing("D1_ERROR: network connection lost"), "/ingest", { body: one() });
 	assert.equal(other.status, 500);
 	assert.deepEqual(other.body, { error: "insert_failed" });

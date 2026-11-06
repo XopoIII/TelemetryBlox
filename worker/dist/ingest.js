@@ -28,8 +28,20 @@ export function storageFull(error) {
     const said = error instanceof Error ? error.message : String(error);
     return /SQLITE_FULL|database or disk is full|maximum (database|db) size|database size limit/i.test(said);
 }
-export function json(body, status = 200) {
-    return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+/**
+ * Whether a D1 error is the database refusing work for a moment rather than for good: D1's own
+ * overload messages, and SQLite's CPU limit when a statement runs too long. The pipe waits on a 5xx
+ * without spending a try, so these get their own answer and their own short wait.
+ */
+export function overloaded(error) {
+    const said = error instanceof Error ? error.message : String(error);
+    return /D1 DB is overloaded|Too many resources consumed|CPU time limit/i.test(said);
+}
+export function json(body, status = 200, headers = {}) {
+    return new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json", ...headers },
+    });
 }
 async function digestOf(text) {
     return new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
@@ -197,8 +209,11 @@ export async function ingest(config, request, env, ctx, limiter) {
             jobId,
             count: events.length,
         }));
-        // 5xx on purpose: the pipe sends the batch again, and the unique index makes that free. A
-        // database at its size limit answers 507, so the server's own warning names it.
+        // 5xx on purpose: the pipe sends the batch again, and the unique index makes that free. An
+        // overloaded database answers 503 with a short wait, so the pipe holds the batch rather than
+        // spending a try; one at its size limit answers 507, so the server's own warning names it.
+        if (overloaded(error))
+            return json({ error: "overloaded" }, 503, { "retry-after": "10" });
         if (storageFull(error))
             return json({ error: "storage_full" }, 507);
         return json({ error: "insert_failed" }, 500);

@@ -200,7 +200,7 @@ async function cron(env, hour) {
 	await Promise.all(waited);
 }
 
-test("an hourly run scans and nothing else; the nightly run also rolls up, prunes and sends the digest", async () => {
+test("an hourly run scans and rolls the finished day up; the nightly run also prunes and sends the digest", async () => {
 	const env = environment();
 	await call(env, "/ingest", {
 		body: batch([
@@ -208,10 +208,17 @@ test("an hourly run scans and nothing else; the nightly run also rolls up, prune
 			{ event: "feed", actor: "u_b", t: YESTERDAY },
 		]),
 	});
+	// A batch arrives with its rows in life, and the roll-up reads it only around their day: say so,
+	// rather than let it depend on the UTC hour the test runs at.
+	env.DB.raw.prepare("UPDATE batches SET received_at = ? WHERE id = 1").run(YESTERDAY + 60);
 	env.DB.raw.exec("INSERT INTO alert_state (key, sent_at, held, released) VALUES ('old', 1000, 0, 0)");
 	await cron(env, 14);
 	assert.deepEqual(rows(env, "SELECT batch_id FROM alert_cursor"), [{ batch_id: 1 }]);
-	assert.equal(rows(env, "SELECT COUNT(*) AS n FROM events_daily")[0].n, 0);
+	// The finished day is rolled up hourly now, so a backlog drains through the day, not only at night.
+	assert.deepEqual(rows(env, "SELECT event, events, actors FROM events_daily ORDER BY event"), [
+		{ event: "*", events: 2, actors: 2 },
+		{ event: "feed", events: 2, actors: 2 },
+	]);
 	assert.equal(telegram.sent.length, 0);
 	assert.equal(rows(env, "SELECT COUNT(*) AS n FROM alert_state")[0].n, 1);
 

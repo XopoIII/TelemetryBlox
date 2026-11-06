@@ -26,7 +26,7 @@
  */
 import { type Alert, type BatchMeta } from "./alerts.js";
 import { type Env, type Resolved, type SeenEvent, type WorkerConfig } from "./config.js";
-import { type Wall } from "./retention.js";
+import { type RollUp, type Wall } from "./retention.js";
 export type { Alert, BatchMeta } from "./alerts.js";
 export type { Announcement } from "./announce.js";
 export { ANNOUNCE_TEXT, ANNOUNCE_TITLE } from "./announce.js";
@@ -52,8 +52,10 @@ export interface Kit {
     silent: (env: Env) => Promise<Record<string, unknown>>;
     /** The nightly roll-up and pruning. */
     retention: (env: Env) => Promise<Record<string, unknown>>;
-    /** The size wall alone, as the hourly runs do it. */
-    hourlyWall: (env: Env) => Promise<Wall>;
+    /** The finished days after the cursor, as every hourly run does it. */
+    rollUp: (env: Env) => Promise<RollUp>;
+    /** The size wall alone, as the hourly runs do it; `used` is what the same run's roll-up spent. */
+    hourlyWall: (env: Env, used?: number) => Promise<Wall>;
     /** Whether the run scheduled at `scheduledTime` (ms) is the nightly one. */
     isNightly: (scheduledTime: number) => boolean;
     /** What a Roblox webhook's body says, as a message. */
