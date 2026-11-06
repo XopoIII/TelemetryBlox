@@ -616,15 +616,41 @@ export async function retention(config: Resolved, env: Env): Promise<Record<stri
 			`${config.marks.warning} ${config.game}: the nightly job read ${meter.rowsRead} rows of D1 (warned past ${config.nightlyReadWarn})`,
 		);
 	}
-	// And the size wall, once a night: past it D1 refuses the ingest.
+	// And the size wall: past it D1 refuses the ingest. Once every six hours at most, because said on
+	// every run it is said a hundred times while a backlog is rolled up, and a warning that repeats
+	// is a warning nobody reads (2026-11-06: four in a minute, the catch-up calling the job). A
+	// reason that changed is news at once.
 	if (wall.warn) {
-		await send(
-			config,
-			env,
-			`${config.marks.warning} ${config.game}: ${wall.rawEvents} raw events left after the size wall, over maxRawEvents ${config.maxRawEvents} (${wall.warn})`,
-		);
+		const [was, at] = await warnedAt(db, meter);
+		const now = Math.floor(Date.now() / 1000);
+		if (was !== wall.warn || now - at >= WALL_WARN_SECONDS) {
+			await send(
+				config,
+				env,
+				`${config.marks.warning} ${config.game}: ${wall.rawEvents} raw events left after the size wall, over maxRawEvents ${config.maxRawEvents} (${wall.warn})`,
+			);
+			await attempt(() => db.prepare(SIZE_WARN_SAVE).bind(`${wall.warn}|${now}`));
+			meter.queries++;
+		}
 	}
 	return report;
+}
+
+const SIZE_WARN_READ = `SELECT value FROM retention_state WHERE name = 'wall_warn'`;
+const SIZE_WARN_SAVE = `INSERT OR REPLACE INTO retention_state (name, value) VALUES ('wall_warn', ?1)`;
+/** How long the size wall's warning rests before it is said again, if the reason has not changed. */
+const WALL_WARN_SECONDS = 6 * 3600;
+
+/** When the wall's warning was last said, and why. A read D1 refuses is "never said". */
+async function warnedAt(db: D1Database, meter: Meter): Promise<[string, number]> {
+	const last = await firstOf<{ value: string | null }>(() => db.prepare(SIZE_WARN_READ));
+	meter.queries++;
+	const value = last instanceof Error ? null : (last.row?.value ?? null);
+	if (!value) return ["", 0];
+	const cut = value.lastIndexOf("|");
+	if (cut < 0) return ["", 0];
+	const at = Number(value.slice(cut + 1));
+	return [value.slice(0, cut), Number.isFinite(at) ? at : 0];
 }
 
 /** What the size wall did. `warn` says why events are still over budget, if they are. */

@@ -4,6 +4,20 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.9.6 - 2026-11-06
+
+The pipe does not change (`src/` is 0.8.8's), the schema is as 0.9.0 left it, and no migration is
+needed; a game that moves to it deploys its Worker.
+
+### Fixed
+
+- **The size wall's warning rests six hours before it is said again.** It was said on every
+  `/retention` run that ended over budget, and while a backlog is being rolled up that is every
+  run: on 2026-11-06 a catch-up calling the job every twenty seconds put four identical warnings in
+  the chat within an hour. The reason and the time it was last said are kept in `retention_state`
+  as `wall_warn`; a run inside the six hours stays quiet, and a warning whose reason has changed
+  is sent at once. The hourly run sends none, as before.
+
 ## 0.9.5 - 2026-11-06
 
 The pipe does not change (`src/` is 0.8.8's), the schema is as 0.9.0 left it, and no migration is

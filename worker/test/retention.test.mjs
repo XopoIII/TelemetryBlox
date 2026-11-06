@@ -194,6 +194,28 @@ test("the size wall never takes the day being collected, and says so once a nigh
 	]);
 });
 
+test("a size wall over budget is said once in six hours, not on every call", async () => {
+	const env = environment();
+	store(env, NOW - HOUR, [
+		[NOW - HOUR, "join", "u_b"],
+		[NOW - HOUR, "feed", "u_b"],
+		[NOW - HOUR, "feed", "u_b"],
+	]);
+	const tiny = createWorker({ ...CONFIG, maxRawEvents: 2 });
+	// Three runs inside one window say it once: a catch-up calls the job every twenty seconds.
+	for (let run = 0; run < 3; run++) {
+		const answered = (await call(env, "/retention", { handler: tiny })).body;
+		assert.equal(answered.warn, "the rows not rolled up yet are over budget by themselves");
+	}
+	assert.equal(texts().length, 1);
+	// Six hours later it is said again: a wall that stays over budget is not a solved one.
+	env.DB.raw
+		.prepare("INSERT OR REPLACE INTO retention_state (name, value) VALUES ('wall_warn', ?1)")
+		.run(`the rows not rolled up yet are over budget by themselves|${Math.floor(NOW / 1000) - 6 * HOUR}`);
+	await call(env, "/retention", { handler: tiny });
+	assert.equal(texts().length, 2);
+});
+
 test("a day that will not go in one statement is rolled up in slices, its per-event players left unknown", async () => {
 	const env = environment();
 	const yesterday = TODAY - DAY + HOUR;
