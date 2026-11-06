@@ -221,8 +221,25 @@ async function firstOf(statement) {
  * it is done. Returns where it stopped; the caller decides what to do with the meter.
  */
 async function rollUpDays(db, meter, read, ceiling = QUERY_BUDGET - QUERY_RESERVE) {
-    const state = await db.prepare(STATE).first();
+    // The run's first read, and even this one can be the statement D1 is too busy for: a saturation
+    // reached by the run before it made the whole run a 500 four times over on 2026-11-06.
+    const opened = await firstOf(() => db.prepare(STATE));
     meter.queries++;
+    if (opened instanceof Error) {
+        // Nothing was read, so nothing can be said about where the roll-up stands: the next run asks
+        // again. Reported, not thrown at the route.
+        return {
+            rolledUp: 0,
+            rolledFrom: "",
+            sliced: [],
+            skipped: [],
+            state: { day: "", slice: 0 },
+            queries: meter.queries,
+            rowsRead: 0,
+            failed: { day: "", from: "", error: opened.message },
+        };
+    }
+    const state = opened.row;
     const now = Math.floor(Date.now() / 1000);
     const lastDay = now - (now % DAY_SECONDS) - DAY_SECONDS;
     const saved = state?.day ?? 0;
@@ -259,17 +276,26 @@ async function rollUpDays(db, meter, read, ceiling = QUERY_BUDGET - QUERY_RESERV
             }
             read(done);
             rolledUp += done.meta?.changes ?? 0;
-            await db.prepare(DISCARD).bind(text).run();
+            // The day's rows go, then the cursor. A refusal at either leaves the day where it is: the
+            // aggregate above is safe to repeat, so the next run rolls it up again rather than
+            // leaving rows behind or a cursor past them.
+            const dropped = await attempt(() => db.prepare(DISCARD).bind(text));
             meter.queries++;
+            if (dropped instanceof Error) {
+                failed = { day: text, from: new Date(day * 1000).toISOString(), error: dropped.message };
+                break;
+            }
+            read(dropped);
             const stars = await attempt(() => db.prepare(STAR_ACTORS).bind(day, day + DAY_SECONDS, text));
             meter.queries++;
             if (!(stars instanceof Error))
                 read(stars);
-            await db
-                .prepare(SAVE_STATE)
-                .bind(day + DAY_SECONDS, 0)
-                .run();
+            const moved = await attempt(() => db.prepare(SAVE_STATE).bind(day + DAY_SECONDS, 0));
             meter.queries++;
+            if (moved instanceof Error) {
+                failed = { day: text, from: new Date(day * 1000).toISOString(), error: moved.message };
+                break;
+            }
             sliced.push(text);
             day += DAY_SECONDS;
             slice = 0;
@@ -403,16 +429,23 @@ async function rollUpDays(db, meter, read, ceiling = QUERY_BUDGET - QUERY_RESERV
  * the window of the roll-up and the day before it.
  */
 export async function firsts(db, meter, read, ceiling, chunk = ACTOR_BATCH_CHUNK) {
-    const cursor = await db
-        .prepare(`SELECT batch_id FROM alert_cursor WHERE name = 'actors'`)
-        .first();
+    // Three reads before the work, each wrapped: a saturation is a step the next run takes, never a
+    // 500 that takes the whole night's report with it (the rule of 0.9.3, missed here until 0.9.7).
+    const cursorRead = await firstOf(() => db.prepare(`SELECT batch_id FROM alert_cursor WHERE name = 'actors'`));
     meter.queries++;
-    const newest = await db.prepare(`SELECT COALESCE(MAX(id), 0) AS id FROM batches`).first();
+    const newest = await firstOf(() => db.prepare(`SELECT COALESCE(MAX(id), 0) AS id FROM batches`));
     meter.queries++;
-    const rolled = await db.prepare(`SELECT MAX(day) AS day FROM events_daily`).first();
+    const rolled = await firstOf(() => db.prepare(`SELECT MAX(day) AS day FROM events_daily`));
     meter.queries++;
-    const to = newest?.id ?? 0;
-    const floor = cursor ? 0 : rolled?.day ? unixDay(rolled.day) - DAY_SECONDS : 0;
+    if (cursorRead instanceof Error)
+        return { newActors: 0, to: 0, failed: { batch: 0, error: cursorRead.message } };
+    if (newest instanceof Error)
+        return { newActors: 0, to: 0, failed: { batch: 0, error: newest.message } };
+    if (rolled instanceof Error)
+        return { newActors: 0, to: 0, failed: { batch: 0, error: rolled.message } };
+    const cursor = cursorRead.row;
+    const to = newest.row?.id ?? 0;
+    const floor = cursor ? 0 : rolled.row?.day ? unixDay(rolled.row.day) - DAY_SECONDS : 0;
     let from = cursor?.batch_id ?? 0;
     let newActors = 0;
     let width = chunk;
@@ -444,8 +477,12 @@ export async function firsts(db, meter, read, ceiling, chunk = ACTOR_BATCH_CHUNK
         }
         read(res);
         newActors += res.meta?.changes ?? 0;
-        await db.prepare(`INSERT OR REPLACE INTO alert_cursor (name, batch_id) VALUES ('actors', ?1)`).bind(last).run();
+        // The kept range is in; the cursor is the one statement that must land, so a refusal here
+        // leaves the range to be kept again rather than skipping what it holds.
+        const moved = await attempt(() => db.prepare(`INSERT OR REPLACE INTO alert_cursor (name, batch_id) VALUES ('actors', ?1)`).bind(last));
         meter.queries++;
+        if (moved instanceof Error)
+            return { newActors, to: from, failed: { batch: last, error: moved.message } };
         from = last;
     }
     return { newActors, to: from };

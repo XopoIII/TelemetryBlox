@@ -194,6 +194,62 @@ test("the size wall never takes the day being collected, and says so once a nigh
 	]);
 });
 
+test("a roll-up whose first read D1 refuses answers 200 and says where it stopped", async () => {
+	const env = environment();
+	const yesterday = TODAY - DAY;
+	store(env, yesterday + 6 * HOUR, [[yesterday + 6 * HOUR, "join", "u_a"]]);
+	// The run's opening read, and no other, is what the busy database refuses.
+	const db = env.DB;
+	env.DB = {
+		...db,
+		prepare: (sql) =>
+			sql.includes("retention_state WHERE name = 'rollup_day'")
+				? {
+						first: async () => {
+							throw new Error("D1_ERROR: D1 DB is overloaded");
+						},
+						bind: () => env.DB,
+					}
+				: db.prepare(sql),
+	};
+	const answered = await call(env, "/retention", { handler: createWorker(CONFIG) });
+	assert.equal(answered.status, 200);
+	assert.equal(answered.body.failed.error, "D1_ERROR: D1 DB is overloaded");
+	assert.equal(answered.body.rolledUp, 0);
+});
+
+test("a day's rows D1 refuses to drop leave the cursor before them", async () => {
+	const env = environment();
+	const yesterday = TODAY - DAY;
+	// A day over the exact statement's limit, so it goes in slices and reaches its discard.
+	bulk(env, yesterday + 6 * HOUR);
+	store(env, yesterday + 6 * HOUR, [[yesterday + 6 * HOUR, "join", "u_a"]]);
+	// The discard alone is refused: the day is aggregated, its rows stay, and the cursor must not
+	// pass them, or the next run would count a day whose rows are gone as done.
+	const db = env.DB;
+	env.DB = {
+		...db,
+		prepare: (sql) =>
+			sql.startsWith("DELETE FROM events_slice")
+				? {
+						bind: () => ({
+							run: async () => {
+								throw new Error("D1_ERROR: D1 DB is overloaded");
+							},
+						}),
+					}
+				: db.prepare(sql),
+	};
+	const answered = await call(env, "/retention", { handler: createWorker(CONFIG) });
+	assert.equal(answered.status, 200);
+	assert.equal(answered.body.failed.error, "D1_ERROR: D1 DB is overloaded");
+	// Its slices are all in, and it stays open: the next run aggregates the day again and drops it.
+	assert.equal(Number(rows(env, "SELECT value FROM retention_state WHERE name = 'rollup_slice'")[0].value), DAY);
+	assert.ok(
+		Number(rows(env, "SELECT value FROM retention_state WHERE name = 'rollup_day'")[0].value) < yesterday + DAY,
+	);
+});
+
 test("a size wall over budget is said once in six hours, not on every call", async () => {
 	const env = environment();
 	store(env, NOW - HOUR, [

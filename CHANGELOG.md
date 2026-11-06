@@ -4,6 +4,22 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.9.7 - 2026-11-06
+
+The pipe does not change (`src/` is 0.8.8's), the schema is as 0.9.0 left it, and no migration is
+needed; a game that moves to it deploys its Worker.
+
+### Fixed
+
+- **Every statement the roll-up and the first-seen step make answers or is reported.** Six were
+  still bare: the run's opening read of `retention_state`, the day's `DELETE FROM events_slice`,
+  the cursor move after it, the first-seen step's three opening reads and its `alert_cursor`
+  write. On 2026-11-06, in the middle of a backlog catch-up, a ten-second window saturated by the
+  run before it made the opening read throw, and `/retention` answered `{"error":"internal"}` four
+  times in a row. Each is now `firstOf`/`attempt`: a run that cannot read where it stands says so,
+  a day whose rows will not drop stays open (its aggregate is safe to repeat), and a cursor that will
+  not move leaves its range to be kept again.
+
 ## 0.9.6 - 2026-11-06
 
 The pipe does not change (`src/` is 0.8.8's), the schema is as 0.9.0 left it, and no migration is
