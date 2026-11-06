@@ -76,6 +76,7 @@ const STATE = `SELECT
 	(SELECT MAX(day) FROM events_daily) AS rolled,
 	(SELECT value FROM retention_state WHERE name = 'rollup_day') AS day,
 	(SELECT value FROM retention_state WHERE name = 'rollup_slice') AS slice,
+	(SELECT value FROM retention_state WHERE name = 'rollup_width') AS width,
 	(SELECT MIN(received_at) FROM batches) AS first`;
 
 /**
@@ -174,6 +175,14 @@ const FIRSTS = `INSERT OR IGNORE INTO actors (actor, env, universe_id, first_see
 const SAVE_STATE = `INSERT OR REPLACE INTO retention_state (name, value)
 	VALUES ('rollup_day', ?1), ('rollup_slice', ?2)`;
 
+/**
+ * The slice width a run proved. It is kept apart from the cursor because it has to survive the run
+ * that found it: a refusal is proof the database's ten-second window is spent, and a smaller
+ * statement tried in the same window is refused too. The next run starts narrower, in a window
+ * that has drained.
+ */
+const SAVE_WIDTH = `INSERT OR REPLACE INTO retention_state (name, value) VALUES ('rollup_width', ?1)`;
+
 /** How far one run got, what it read, and where it stopped. */
 export interface RollUp {
 	/** Rows written into `events_slice` and `events_daily`: the night's work. */
@@ -266,9 +275,13 @@ async function rollUpDays(
 	read: Read,
 	ceiling = QUERY_BUDGET - QUERY_RESERVE,
 ): Promise<RollUp> {
-	const state = await db
-		.prepare(STATE)
-		.first<{ rolled: string | null; day: number | null; slice: number | null; first: number | null }>();
+	const state = await db.prepare(STATE).first<{
+		rolled: string | null;
+		day: number | null;
+		slice: number | null;
+		width: number | null;
+		first: number | null;
+	}>();
 	meter.queries++;
 	const now = Math.floor(Date.now() / 1000);
 	const lastDay = now - (now % DAY_SECONDS) - DAY_SECONDS;
@@ -277,9 +290,12 @@ async function rollUpDays(
 	const start = saved > 0 ? saved : bootstrapDay(state?.rolled ?? null, first, lastDay);
 	let day = start;
 	let slice = saved > 0 ? Math.min(Math.max(state?.slice ?? 0, 0), DAY_SECONDS) : 0;
-	// The width the last slice of this day went in at: a day that needed three hours does not try
-	// six again for every slice, and a failure costs one statement, not four, each run.
-	let widthStep = 0;
+	// The width the last run proved. A day that needed three hours does not try six again for every
+	// slice, and a refusal is proof the ten-second window is spent: the run stops there and the next
+	// one starts narrower, instead of retrying four widths inside the same spent window and reading
+	// millions of rows for nothing (2026-11-02: 2.5 million a run, the cursor standing still).
+	const proved = Math.floor(state?.width ?? 0);
+	let widthStep = proved >= 0 && proved < SLICE_WIDTHS.length ? proved : 0;
 	let slices = 0;
 	let rolledUp = 0;
 	const sliced: string[] = [];
@@ -314,7 +330,11 @@ async function rollUpDays(
 			sliced.push(text);
 			day += DAY_SECONDS;
 			slice = 0;
-			widthStep = 0;
+			if (widthStep !== 0) {
+				widthStep = 0;
+				await attempt(() => db.prepare(SAVE_WIDTH).bind(0));
+				meter.queries++;
+			}
 			continue;
 		}
 		if (slice === 0) {
@@ -337,7 +357,11 @@ async function rollUpDays(
 				meter.queries++;
 				skipped.push(text);
 				day += DAY_SECONDS;
-				widthStep = 0;
+				if (widthStep !== 0) {
+					widthStep = 0;
+					await attempt(() => db.prepare(SAVE_WIDTH).bind(0));
+					meter.queries++;
+				}
 				continue;
 			}
 			if (events <= EXACT_MAX_EVENTS) {
@@ -353,49 +377,50 @@ async function rollUpDays(
 						.run();
 					meter.queries++;
 					day += DAY_SECONDS;
-					widthStep = 0;
+					if (widthStep !== 0) {
+						widthStep = 0;
+						await attempt(() => db.prepare(SAVE_WIDTH).bind(0));
+						meter.queries++;
+					}
 					continue;
 				}
 				// Not in one statement after all, whatever the batches' counts said: slice it.
 			}
 		}
-		let written = false;
-		for (let step = widthStep; step < SLICE_WIDTHS.length; step++) {
-			const ladder = SLICE_WIDTHS[step];
-			if (ladder === undefined) break;
-			const at = day + slice;
-			const width = Math.min(ladder, day + DAY_SECONDS - at);
-			if (meter.queries + 2 > ceiling) break;
-			const result = await attempt(() => db.prepare(SLICE).bind(at, at + width, text));
-			meter.queries++;
-			if (result instanceof Error) {
-				// The same range, at half the width: a day too big for a six-hour statement may go
-				// in a three-hour one. Past fifteen minutes the run stops, the cursor standing
-				// before the slice, so the next run tries again instead of skipping a hole.
-				if (step + 1 < SLICE_WIDTHS.length) {
-					widthStep = step + 1;
-					continue;
-				}
-				failed = { day: text, from: new Date(at * 1000).toISOString(), error: result.message };
-				break;
+		// One attempt a run, at the width the last run proved. A refusal is proof the database's
+		// ten-second window is spent, and a smaller statement in the same window is refused too --
+		// so the run stops, the cursor standing before the slice, and the next run starts a step
+		// narrower. Retrying four widths here read millions of rows for nothing and never moved the
+		// cursor (2026-11-02: 2.5 million a run, the window spent by the first attempt).
+		const ladder = SLICE_WIDTHS[widthStep];
+		if (ladder === undefined) break;
+		const at = day + slice;
+		const width = Math.min(ladder, day + DAY_SECONDS - at);
+		if (meter.queries + 3 > ceiling) break;
+		const result = await attempt(() => db.prepare(SLICE).bind(at, at + width, text));
+		meter.queries++;
+		if (result instanceof Error) {
+			failed = { day: text, from: new Date(at * 1000).toISOString(), error: result.message };
+			const narrower = Math.min(widthStep + 1, SLICE_WIDTHS.length - 1);
+			if (narrower !== widthStep) {
+				widthStep = narrower;
+				await attempt(() => db.prepare(SAVE_WIDTH).bind(narrower));
+				meter.queries++;
 			}
-			read(result);
-			rolledUp += result.meta?.changes ?? 0;
-			// The cursor moves only once the slice is committed. A run killed before that repeats
-			// the slice, which REPLACE makes free; a cursor moved first could skip it for ever.
-			const savedState = await attempt(() => db.prepare(SAVE_STATE).bind(day, slice + width));
-			meter.queries++;
-			if (savedState instanceof Error) {
-				failed = { day: text, from: new Date(at * 1000).toISOString(), error: savedState.message };
-				break;
-			}
-			slice += width;
-			slices++;
-			widthStep = step;
-			written = true;
 			break;
 		}
-		if (!written) break;
+		read(result);
+		rolledUp += result.meta?.changes ?? 0;
+		// The cursor moves only once the slice is committed. A run killed before that repeats
+		// the slice, which REPLACE makes free; a cursor moved first could skip it for ever.
+		const savedState = await attempt(() => db.prepare(SAVE_STATE).bind(day, slice + width));
+		meter.queries++;
+		if (savedState instanceof Error) {
+			failed = { day: text, from: new Date(at * 1000).toISOString(), error: savedState.message };
+			break;
+		}
+		slice += width;
+		slices++;
 	}
 
 	return {

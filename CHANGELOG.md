@@ -4,6 +4,25 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.9.4 - 2026-11-06
+
+The pipe does not change (`src/` is 0.8.8's), the schema is as 0.9.0 left it, and no migration is
+needed; a game that moves to it deploys its Worker.
+
+### Fixed
+
+- **A refused slice is not retried inside the same spent ten-second window.** The roll-up walked
+  four slice widths (six hours, three, one, fifteen minutes) whenever D1 refused the first: but the
+  refusal means the database's ten-second window is spent by that very statement, so the narrower
+  ones were refused too, 2.5 million rows were read for nothing, and the cursor never moved. A
+  backlog stalled on one slice of 2026-11-02 while a six-hour statement run on its own went in in
+  6.8 seconds. A run now makes one attempt at a slice and stops on a refusal; the width the last run
+  proved is kept in `retention_state` (`rollup_width`) and the next run starts a step narrower, in
+  a window that has drained. The first run of a fresh day starts at six hours again, so a backlog
+  drains over runs instead of never.
+- **A slice that fits is no longer re-measured four times a run.** The widths are a ladder across
+  runs, not a retry inside one.
+
 ## 0.9.3 - 2026-11-06
 
 The pipe does not change (`src/` is 0.8.8's), the schema is as 0.9.0 left it, and no migration is

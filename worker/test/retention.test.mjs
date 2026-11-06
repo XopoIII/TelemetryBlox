@@ -348,8 +348,9 @@ test("a night cut off inside a day resumes at the next slice without counting an
 	store(env, yesterday + 8 * HOUR, [[yesterday + 8 * HOUR, "join", "u_b"]]);
 	// The day's own count says it is too big for one statement: six-hour slices it is.
 	bulk(env, yesterday + 3 * HOUR);
-	// D1 refuses the six-hour, three-hour, one-hour and fifteen-minute statements of the second
-	// slice: the run must stop with the cursor before it, not walk over a hole.
+	// D1 refuses the six-hour statement of the second slice: the run must stop with the cursor
+	// before it, not walk over a hole, and it must not try a smaller width in the same spent
+	// ten-second window -- the next run starts narrower instead.
 	const base = env.DB;
 	let failures = 0;
 	const flaky = {
@@ -379,6 +380,10 @@ test("a night cut off inside a day resumes at the next slice without counting an
 	assert.equal(cut.failed.from, new Date((yesterday + 6 * HOUR) * 1000).toISOString());
 	assert.deepEqual(cut.state, { day: day(yesterday), slice: 6 * HOUR });
 	assert.deepEqual(cut.sliced, []);
+	// One statement, one refusal: the widths below six hours are not tried against a spent window.
+	assert.equal(failures, 1, "a refused slice is not retried in the same window");
+	// And the narrower width is kept for the next run.
+	assert.deepEqual(rows(env, "SELECT value FROM retention_state WHERE name = 'rollup_width'"), [{ value: 1 }]);
 	// The first six hours are in, and committed: they are not read again.
 	assert.deepEqual(rows(env, "SELECT day, slice_from, event, events FROM events_slice"), [
 		{ day: day(yesterday), slice_from: yesterday, event: "feed", events: 1 },
@@ -400,6 +405,8 @@ test("a night cut off inside a day resumes at the next slice without counting an
 		],
 	);
 	assert.equal(rows(env, "SELECT COUNT(*) AS n FROM events_slice")[0].n, 0);
+	// A finished day hands the next one the widest slice again.
+	assert.deepEqual(rows(env, "SELECT value FROM retention_state WHERE name = 'rollup_width'"), [{ value: 0 }]);
 });
 
 test("re-running a day's slices replaces its rows instead of adding to them", async () => {
