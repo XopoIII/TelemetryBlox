@@ -4,6 +4,22 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.9.3 - 2026-11-06
+
+The pipe does not change (`src/` is 0.8.8's), the schema is as 0.9.0 left it, and no migration is
+needed; a game that moves to it deploys its Worker.
+
+### Fixed
+
+- **The nightly job no longer answers 500 when D1 is too busy for its last two steps.** The age prune
+  and the size wall read their statements bare; on a database saturated by the roll-up's own work
+  (2026-11-06, ten days of backlog) D1 answered the prune's `DELETE` with "D1 DB is overloaded. Too
+  many resources consumed within a 10 second window" and the whole run — roll-up included, and the
+  days it had just written — came back as `{"error":"internal"}`. The prune, the wall's counts and
+  its deletes now go through the same attempt-or-report rule as every other statement: a refusal
+  becomes `pruneFailed` or `wallFailed` in the report and the next run tries again. A wall whose
+  count cannot be read is said, never read as a database under budget.
+
 ## 0.9.2 - 2026-11-06
 
 The pipe does not change (`src/` is 0.8.8's), the schema is as 0.9.0 left it, and no migration is

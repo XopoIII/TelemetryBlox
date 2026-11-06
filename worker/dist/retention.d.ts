@@ -109,6 +109,8 @@ export interface Wall {
     overBudgetBatches: number;
     queries: number;
     warn: string | undefined;
+    /** The statement it could not make this run, if D1 refused one: the next run tries again. */
+    failed?: string;
 }
 /**
  * The size wall alone, every hour: a day's rows past `maxRawEvents` go before the night, so D1

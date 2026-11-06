@@ -189,6 +189,15 @@ async function attempt(statement) {
         return error instanceof Error ? error : new Error(String(error));
     }
 }
+/** The same, for a many-row read: a wall D1 refuses is said in the report, not thrown at it. */
+async function allOf(statement) {
+    try {
+        return (await statement().all());
+    }
+    catch (error) {
+        return error instanceof Error ? error : new Error(String(error));
+    }
+}
 /** The same, for a one-row read: a boundary D1 refuses is a value to retry at, not the end. */
 async function firstOf(statement) {
     try {
@@ -438,16 +447,21 @@ export async function retention(config, env) {
     // 2. The finished days after the cursor. The same bounded roll-up the hourly runs make, so a
     //    backlog drains an hour at a time instead of waiting for a night that may not finish it.
     const rolled = await rollUpDays(db, meter, read, QUERY_BUDGET - QUERY_RESERVE);
-    // 3. Past the age window, oldest first, in chunks.
+    // 3. Past the age window, oldest first, in chunks. A window saturated by the statements above is
+    //    a prune the next run makes, never the 500 that hid the backlog's failure on 2026-11-06.
     let deleted = 0;
+    let pruneFailed;
     while (meter.queries < QUERY_BUDGET) {
-        const res = await db
+        const res = await attempt(() => db
             .prepare(`DELETE FROM batches WHERE id IN (
-				   SELECT id FROM batches WHERE received_at < unixepoch('now', ?1) ORDER BY id LIMIT ?2
-				 )`)
-            .bind(`-${config.retentionDays} days`, PRUNE_CHUNK)
-            .run();
+					   SELECT id FROM batches WHERE received_at < unixepoch('now', ?1) ORDER BY id LIMIT ?2
+					 )`)
+            .bind(`-${config.retentionDays} days`, PRUNE_CHUNK));
         meter.queries++;
+        if (res instanceof Error) {
+            pruneFailed = res.message;
+            break;
+        }
         read(res);
         const n = res.meta?.changes ?? 0;
         deleted += n;
@@ -469,8 +483,10 @@ export async function retention(config, env) {
         newActors: kept.newActors,
         actorCursor: kept.to,
         ...(kept.failed ? { firstsFailed: kept.failed } : {}),
+        ...(pruneFailed ? { pruneFailed } : {}),
         deletedBatches: deleted,
         overBudgetBatches: wall.overBudgetBatches,
+        ...(wall.failed ? { wallFailed: wall.failed } : {}),
         rawEvents: wall.rawEvents,
         // Counted after the age prune, so only the size prune is still to come off.
         rawBatches: wall.rawBatches,
@@ -499,36 +515,48 @@ export async function retention(config, env) {
  */
 async function sizeWall(config, db, used) {
     let queries = used;
-    const counted = await db
-        .prepare(`SELECT COALESCE(SUM(n), 0) AS events, COUNT(*) AS batches FROM batches`)
-        .first();
+    const counted = await firstOf(() => db.prepare(`SELECT COALESCE(SUM(n), 0) AS events, COUNT(*) AS batches FROM batches`));
     queries++;
-    let rawEvents = counted?.events ?? 0;
-    let rawBatches = counted?.batches ?? 0;
+    // A count D1 is too busy to answer is not a database under budget: it is said, and the next run
+    // makes the wall. Reading it as zero would be a wall that quietly stops existing.
+    if (counted instanceof Error) {
+        return { rawEvents: 0, rawBatches: 0, overBudgetBatches: 0, queries, warn: undefined, failed: counted.message };
+    }
+    let rawEvents = counted.row?.events ?? 0;
+    let rawBatches = counted.row?.batches ?? 0;
     let overBudgetBatches = 0;
     if (rawEvents <= config.maxRawEvents) {
         return { rawEvents, rawBatches, overBudgetBatches, queries, warn: undefined };
     }
-    const done = await db
-        .prepare(`SELECT (SELECT MAX(day) FROM events_daily) AS rolled,
+    const done = await firstOf(() => db.prepare(`SELECT (SELECT MAX(day) FROM events_daily) AS rolled,
 			        (SELECT value FROM retention_state WHERE name = 'rollup_day') AS state,
-			        (SELECT batch_id FROM alert_cursor WHERE name = 'actors') AS cursor`)
-        .first();
+			        (SELECT batch_id FROM alert_cursor WHERE name = 'actors') AS cursor`));
     queries++;
+    if (done instanceof Error) {
+        return { rawEvents, rawBatches, overBudgetBatches, queries, warn: undefined, failed: done.message };
+    }
     // The roll-up's own cursor is the horizon: a batch received before it (less the slack) cannot
     // hold an event of a day still to roll up, so every day it could hold is already rolled up.
-    const cursorDay = done?.state && done.state > 0 ? done.state : done?.rolled ? unixDay(done.rolled) + DAY_SECONDS : 0;
+    const cursorDay = done.row?.state && done.row.state > 0
+        ? done.row.state
+        : done.row?.rolled
+            ? unixDay(done.row.rolled) + DAY_SECONDS
+            : 0;
     const before = cursorDay > 0 ? cursorDay - CLOCK_SLACK_SECONDS : 0;
-    const through = done?.cursor ?? 0;
+    const through = done.row?.cursor ?? 0;
     let exhausted = false;
+    let failed;
     while (rawEvents > config.maxRawEvents && queries < QUERY_BUDGET) {
-        const res = await db
+        const res = await allOf(() => db
             .prepare(`DELETE FROM batches WHERE id IN (
-				   SELECT id FROM batches WHERE id <= ?1 AND received_at < ?2 ORDER BY id LIMIT ?3
-				 ) RETURNING n`)
-            .bind(through, before, PRUNE_CHUNK)
-            .all();
+					   SELECT id FROM batches WHERE id <= ?1 AND received_at < ?2 ORDER BY id LIMIT ?3
+					 ) RETURNING n`)
+            .bind(through, before, PRUNE_CHUNK));
         queries++;
+        if (res instanceof Error) {
+            failed = res.message;
+            break;
+        }
         const rows = res.results ?? [];
         overBudgetBatches += rows.length;
         rawBatches -= rows.length;
@@ -547,7 +575,7 @@ async function sizeWall(config, db, used) {
             ? "the rows not rolled up yet are over budget by themselves"
             : "still over maxRawEvents after the query budget";
     }
-    return { rawEvents, rawBatches, overBudgetBatches, queries, warn };
+    return { rawEvents, rawBatches, overBudgetBatches, queries, warn, ...(failed ? { failed } : {}) };
 }
 /**
  * The size wall alone, every hour: a day's rows past `maxRawEvents` go before the night, so D1

@@ -435,3 +435,67 @@ test("a day no batch can hold is skipped, and the cursor moves past it", async (
 		{ name: "rollup_slice", value: 0 },
 	]);
 });
+
+test("a prune D1 is too busy for is said in the report, not thrown at the route", async () => {
+	const env = environment();
+	const yesterday = TODAY - DAY;
+	store(env, yesterday + 6 * HOUR, [[yesterday + 6 * HOUR, "join", "u_a"]]);
+	const base = env.DB;
+	let refusals = 0;
+	const refusing = {
+		...env,
+		DB: {
+			raw: base.raw,
+			prepare: (sql) => {
+				const statement = base.prepare(sql);
+				if (!sql.includes("unixepoch('now'")) return statement;
+				return {
+					bind: () => ({
+						run: async () => {
+							refusals++;
+							throw new Error("D1_ERROR: D1 DB is overloaded");
+						},
+					}),
+				};
+			},
+		},
+	};
+	const response = await call(refusing, "/retention");
+	assert.equal(response.status, 200);
+	assert.equal(refusals, 1);
+	assert.equal(response.body.pruneFailed, "D1_ERROR: D1 DB is overloaded");
+	assert.equal(response.body.deletedBatches, 0);
+	// The night's work stands: a prune that did not run costs no day.
+	assert.deepEqual(rows(env, "SELECT event, events FROM events_daily ORDER BY event"), [
+		{ event: "*", events: 1 },
+		{ event: "join", events: 1 },
+	]);
+});
+
+test("a size wall's count D1 refuses is said, never read as a database under budget", async () => {
+	const env = environment();
+	const yesterday = TODAY - DAY;
+	store(env, yesterday + 6 * HOUR, [[yesterday + 6 * HOUR, "join", "u_a"]]);
+	const base = env.DB;
+	const refusing = {
+		...env,
+		DB: {
+			raw: base.raw,
+			prepare: (sql) => {
+				const statement = base.prepare(sql);
+				if (!sql.includes("COALESCE(SUM(n), 0) AS events, COUNT(*) AS batches")) return statement;
+				const refused = () => {
+					throw new Error("D1_ERROR: D1 DB is overloaded");
+				};
+				return {
+					first: async () => refused(),
+					bind: () => ({ first: async () => refused(), run: async () => refused() }),
+				};
+			},
+		},
+	};
+	const response = await call(refusing, "/retention");
+	assert.equal(response.status, 200);
+	assert.equal(response.body.wallFailed, "D1_ERROR: D1 DB is overloaded");
+	assert.equal(response.body.overBudgetBatches, 0);
+});
