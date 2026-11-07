@@ -7,10 +7,14 @@
 # ring, the batching and the pseudonym checked here are computed by the VM a game computes them with.
 #
 # The Worker's tools are Node's, pinned in package.json and package-lock.json.
+#
+# luau-lsp is pinned to the fork XopoIII/luau-lsp, tagged like 1.70.1-xopoiii.N: upstream's open
+# fixes ahead of a stable release, on Luau 0.745. A fork tag is this project's release, not a
+# prerelease of someone else's.
 
 [tools]
 luneblox = "XopoIII/LuneBlox@0.11.4"       # Luau runtime for the specs
-luau-lsp = "JohnnyMorganz/luau-lsp@1.70.1"  # `luau-lsp analyze` is the type gate
+luau-lsp = "XopoIII/luau-lsp@1.70.1-xopoiii.1"  # `luau-lsp analyze` is the type gate, the fork above
 selene = "Kampfkarren/selene@0.32.0"        # linter
 stylua = "JohnnyMorganz/StyLua@2.6.0"       # formatter
 lefthook = "evilmartians/lefthook@2.2.2"    # git hooks

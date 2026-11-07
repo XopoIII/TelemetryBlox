@@ -4,6 +4,22 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.9.8 - 2026-11-08
+
+A maintenance release. The pipe does not change (`src/` is 0.9.7's), the Worker's code is 0.9.7's
+and no migration is needed; a game that moves to it redeploys its Worker from the new tag.
+
+### Changed
+
+- **The type gate runs on XopoIII/luau-lsp 1.70.1-xopoiii.1**, the fork, from JohnnyMorganz/luau-lsp
+  1.70.1. The analyzer reads Luau 0.745, from 0.740, and carries the fork's fixes ahead of the
+  stable release: `analyze` reports each module's errors once instead of repeating a dependency's,
+  no longer warns about watcher registration it never uses, and `EnumItem.EnumType` is the item's
+  own enum. The Roblox definitions the gate loads now come from the fork's tag, so the pin and the
+  definitions are one thing. Every other tool stays at its current pin.
+- **The `@lune` typedef alias in `.luaurc` follows the pinned LuneBlox 0.11.4**, from 0.11.3.
+  The 0.9.7 pin bump left the alias behind; `luneblox setup` moved it while the gate ran.
+
 ## 0.9.7 - 2026-11-06
 
 The pipe does not change (`src/` is 0.8.8's), the schema is as 0.9.0 left it, and no migration is

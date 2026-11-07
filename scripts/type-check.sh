@@ -20,16 +20,18 @@ for arg in "$@"; do
 	exit 2
 done
 
-# The definitions come from the tag of the luau-lsp that rokit.toml pins, so the gate reads the same
-# Roblox API on every machine and every day. A bump of that pin downloads them again.
-lsp_version="$(sed -n 's/.*JohnnyMorganz\/luau-lsp@\([0-9.]*\)".*/\1/p' rokit.toml)"
-if [ -z "$lsp_version" ]; then
+# The definitions come from the tag of the luau-lsp that rokit.toml pins -- the fork's tag since
+# 0.9.8 -- so the gate reads the same Roblox API on every machine and every day. A bump of that pin
+# downloads them again.
+lsp_repo="$(sed -n 's/^luau-lsp = "\([^"]*\/luau-lsp\)@.*/\1/p' rokit.toml)"
+lsp_version="$(sed -n 's/^luau-lsp = "[^"]*@\([^"]*\)".*/\1/p' rokit.toml)"
+if [ -z "$lsp_repo" ] || [ -z "$lsp_version" ]; then
 	echo "type-check: no luau-lsp pin found in rokit.toml" >&2
 	exit 1
 fi
 if [ ! -f globalTypes.d.luau ] || [ "$(cat globalTypes.d.luau.version 2>/dev/null)" != "$lsp_version" ]; then
 	curl -fsSL -o globalTypes.d.luau \
-		"https://raw.githubusercontent.com/JohnnyMorganz/luau-lsp/$lsp_version/scripts/globalTypes.d.luau"
+		"https://raw.githubusercontent.com/$lsp_repo/$lsp_version/scripts/globalTypes.d.luau"
 	echo "$lsp_version" >globalTypes.d.luau.version
 fi
 luneblox setup >/dev/null
