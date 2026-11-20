@@ -4,13 +4,17 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
-## 0.9.8 - 2026-11-20
+## 0.9.9 - 2026-11-20
 
 The pipe of 0.9.7, with one rule changed (`src/Pipe.luau`): a post that no answer ever came back for
 now waits like a 429 or a 5xx instead of costing the batch one of its tries, so a game that moves to
 it moves `src/` too. The wire is as it was (`schemaVersion` 1), and `worker/` is 0.9.7's byte for
 byte, so a game that moves to it publishes its game and does not redeploy its Worker; no migration
 is needed.
+
+0.9.8 is taken in the registry: it was published on 2026-11-07 by a version bump the repository never
+released — no tag, no entry here — and a published version cannot be replaced. This release takes the
+next number.
 
 ### Fixed
 
