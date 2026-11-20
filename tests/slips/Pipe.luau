@@ -6,6 +6,12 @@ const Mutant = require("./Mutant")
 const MUTANTS: { Mutant.Mutant } = {
 	{
 		file = "src/Pipe.luau",
+		from = "\tif status == nil then\n\t\treturn true",
+		to = "\tif status == nil then\n\t\treturn false",
+		breaks = "a post the ingest never answered asks for time",
+	},
+	{
+		file = "src/Pipe.luau",
 		from = "if tries < config.maxTries then",
 		to = "if tries <= config.maxTries then",
 		breaks = "a batch gets maxTries posts and no more",
