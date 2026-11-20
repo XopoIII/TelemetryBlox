@@ -16,12 +16,14 @@
 --- rows' own numbers), so a post that landed without its answer is ignored by the ingest rather than
 --- stored twice. After `maxTries` posts the batch is counted lost.
 ---
---- A 429 OR A 5xx IS THE INGEST ASKING FOR TIME, not a refusal of the batch: its limiter is over a
---- minute, or its database is full or overloaded, and the same batch is welcome in the next. So such
---- an answer holds the batch without spending one of its tries, for at most `MAX_WAITS` posts of one
---- batch; past that it costs a try like any other answer, so an ingest that says nothing else cannot
---- hold a batch for ever. It buys no extra request: a held batch is posted once a wake, as it always
---- was, and the drain still ends at its budget.
+--- A 429 OR A 5xx IS THE INGEST ASKING FOR TIME, and so is NO ANSWER AT ALL, not a refusal of the
+--- batch: its limiter is over a minute, or its database is full or overloaded, or the post never
+--- left the server or never came back (a timeout, a name that would not resolve, a reset). Nothing
+--- in any of those says anything about the batch, so it is not the batch's fault, and the same batch
+--- is welcome in the next. Such an answer holds the batch without spending one of its tries, for at
+--- most `MAX_WAITS` posts of one batch; past that it costs a try like any other answer, so an ingest
+--- that says nothing else cannot hold a batch for ever. It buys no extra request: a held batch is
+--- posted once a wake, as it always was, and the drain still ends at its budget.
 ---
 --- THE FIRST WAKE IS STAGGERED. A publish or a surge starts many servers in the same second, and a
 --- fleet whose flushers wake together posts together for its whole life. The first wait is the job
@@ -43,7 +45,8 @@ Pipe.CLOSE_RETRY_SECONDS = 2
 Pipe.CLOSE_POLL_SECONDS = 0.25
 --> The status an ingest answers when batches arrive faster than it takes them.
 Pipe.TOO_MANY_REQUESTS = 429
---> Posts of one batch that may be answered 429 or a 5xx without costing it a try.
+--> Posts of one batch that may be answered 429 or a 5xx, or not answered at all, without costing it
+--> a try.
 Pipe.MAX_WAITS = 10
 
 --> Seconds before the flusher's first wake: the job id's hash within the tick, so servers that
@@ -52,11 +55,12 @@ function Pipe.stagger(jobId: string, tickSeconds: number): number
 	return Hash.str32(jobId) % math.max(1, math.floor(tickSeconds))
 end
 
--- The ingest asking for time rather than refusing the batch: its limiter (429), or its database
--- full or overloaded (5xx). Any other answer is the batch's fault and costs it a try.
+-- Whether the failed post was not the batch's fault: the ingest asking for time (its limiter's 429,
+-- its database's 5xx), or no answer at all (a timeout, a name that would not resolve, a reset).
+-- Any other answer is the batch's, and costs it a try.
 const function askingForTime(status: number?): boolean
 	if status == nil then
-		return false
+		return true
 	end
 	return status == Pipe.TOO_MANY_REQUESTS or (status >= 500 and status < 600)
 end
@@ -132,7 +136,8 @@ function Pipe.new(config: Config, ring: Ring.Ring, services: Services.Services):
 
 	-- One post. Returns whether the ingest took the batch, and why not when it did not (the HTTP
 	-- status, or the error: a 401 is the secret, a 400 the payload), with the status when there was
-	-- an answer. Never raises: a transport failure is data lost, not a fault of the game.
+	-- an answer. Never raises: a post that got no answer is held and tried again, not a fault of the
+	-- game.
 	const function post(rows: { Ring.Row }): (boolean, string?, number?)
 		const ok, result = pcall(function(): Services.Response
 			const headers: { [string]: Services.HeaderValue } = { ["content-type"] = "application/json" }
@@ -180,8 +185,8 @@ function Pipe.new(config: Config, ring: Ring.Ring, services: Services.Services):
 			return true
 		end
 		lastReason = why
-		-- Asked to wait (a 429 or a 5xx): the batch is held with its tries as they were (`try` in
-		-- the log is the tries spent, so a batch that has only waited says 0).
+		-- Asked to wait (a 429, a 5xx, or no answer at all): the batch is held with its tries as they
+		-- were (`try` in the log is the tries spent, so a batch that has only waited says 0).
 		if askingForTime(status) and waits < Pipe.MAX_WAITS then
 			waits += 1
 		else
