@@ -18,8 +18,8 @@ TelemetryBlox is two things in one repository:
 It was built and used inside a live game before it became a package, and holds nothing of any
 game: every event name, endpoint, secret's name, alert rule and threshold is handed in.
 
-> **Status: 0.9.7.** The pipe's rules and Roblox's analytics are proven by 120 specs that run off
-> Roblox on LuneBlox, and each of 229 small slips in the code makes the suite fail
+> **Status: 0.9.8.** The pipe's rules and Roblox's analytics are proven by 121 specs that run off
+> Roblox on LuneBlox, and each of 230 small slips in the code makes the suite fail
 > (`tests/Mutate.luau`). The Worker's 120
 > tests run against Node's own SQLite, which D1 is, and a smoke gate serves the built Worker in
 > local `workerd`. **The engine adapter has not run in a Roblox server here:**
@@ -36,7 +36,7 @@ or pin it exactly in `pesde.toml`:
 
 ```toml
 [dependencies]
-TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.9.7", target = "roblox_server" }
+TelemetryBlox = { name = "xopoiii/telemetryblox", version = "=0.9.8", target = "roblox_server" }
 ```
 
 It has no dependencies. The experience needs **Allow HTTP Requests** on.
@@ -119,7 +119,8 @@ that each does.
 | The bulk ring | 2000 rows (`ringSize`), oldest dropped first |
 | The protected ring | 500 rows (`protectedSize`) that the bulk stream cannot evict: `protected` and `urgent` events |
 | A refused batch | held and sent again as the same rows, 3 posts in all (`maxTries`), then counted lost |
-| A batch answered 429 | the ingest asking for time: held and sent again on the next wake without spending a try, for up to 10 posts of one batch; past that a 429 costs a try like any refusal. The log says `try = 0` for a batch that has only waited |
+| A batch answered 429 | the ingest asking for time: held and sent again on the next wake without spending a try, for up to 10 posts of one batch (`MAX_WAITS`); past that a 429 costs a try like any refusal. The log says `try = 0` for a batch that has only waited |
+| A post with no answer | a timeout, a name that would not resolve, a connection reset: the same rule as a 429, because nothing came back to say anything about the batch. Held and tried again without spending a try, up to `MAX_WAITS` posts of one batch; past that it costs a try like any other refusal |
 | A loss | written into the stream as one row of `dropEvent`: `count`, and its parts `overflow` (a full ring), `send_failed` (the ingest never took the batch), `refused` (a call of no use) |
 | Shutdown | the drain posts what waits, waits for the leaving players' last rows, and ends once the server has been empty and silent for 2 s (`closeQuiet`) or 20 s have passed (`closeBudget`) |
 | Studio | never sends. The ring still fills, so `recent()` reads back |
@@ -256,7 +257,7 @@ telemetry/
 		"deploy": "wrangler deploy"
 	},
 	"dependencies": {
-		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.9.7"
+		"telemetryblox": "github:XopoIII/TelemetryBlox#v0.9.8"
 	},
 	"devDependencies": {
 		"wrangler": "4.147.0"

@@ -4,6 +4,35 @@ Every release is listed here, newest first. The format follows Keep a Changelog,
 semantic versioning. One version names both halves: the pesde package and the Worker a game installs
 by the same tag.
 
+## 0.9.8 - 2026-11-20
+
+The pipe of 0.9.7, with one rule changed (`src/Pipe.luau`): a post that no answer ever came back for
+now waits like a 429 or a 5xx instead of costing the batch one of its tries, so a game that moves to
+it moves `src/` too. The wire is as it was (`schemaVersion` 1), and `worker/` is 0.9.7's byte for
+byte, so a game that moves to it publishes its game and does not redeploy its Worker; no migration
+is needed.
+
+### Fixed
+
+- **A post the network never delivered cost a whole batch in three minutes.** On 2026-11-20 a game's
+  servers answered `HttpError: Timedout` to their own posts: the request never reached the ingest,
+  which was healthy and answered every post it saw in about a second. The pipe spent a try on each
+  unanswered post, three of them at 60 seconds each, and a ten-minute batch of 179 to 367 rows was
+  counted lost — nine batches, 2,456 rows, from three servers in nine hours, each one an alert. A
+  post that got no answer at all (a timeout, a name that would not resolve, a connection reset) now
+  says nothing about the batch, exactly as a 429 or a 5xx says nothing: the batch is held and tried
+  again on the next wake without spending a try, for up to `MAX_WAITS` posts of one batch, and past
+  that it costs a try like any other refusal. An answer that refused the batch (a 4xx) still costs
+  its try at once, and the wait's bound still ends a batch an ingest never answers. Every one of the
+  nine batches that morning would have been kept by this rule.
+
+### Not done
+
+- The fault itself is not reproducible here: what the game saw was a Roblox server that could not
+  reach the ingest for some minutes, and this release makes the pipe survive it rather than mend it.
+  Nothing was run in a game or against a deployed Worker for this entry; the rule is proven over the
+  fake ingest, by its spec and by its mutant.
+
 ## 0.9.7 - 2026-11-06
 
 The pipe does not change (`src/` is 0.8.8's), the schema is as 0.9.0 left it, and no migration is
